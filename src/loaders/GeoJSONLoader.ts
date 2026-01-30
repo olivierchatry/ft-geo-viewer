@@ -151,6 +151,9 @@ export class GeoJSONLoader {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    
+    // @ts-ignore
+    if (geometry.computeBoundsTree) geometry.computeBoundsTree();
 
     return new THREE.Mesh(geometry, material);
   }

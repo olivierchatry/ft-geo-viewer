@@ -33,16 +33,30 @@ interface FieldTwinShape {
 }
 
 interface FieldTwinStagedAsset {
-  x: number;
-  y: number;
-  z: number;
+  initialState?: {
+    x: number;
+    y: number;
+    z: number;
+    rotation?: number;
+  };
+  initialSTate?: {
+    x: number;
+    y: number;
+    z: number;
+    rotation?: number;
+  };
   asset?: {
+    model3durl?: string;
     model3dUrl?: string;
   };
+  x?: number;
+  y?: number;
+  z?: number;
   fileId?: string;
   name?: string;
-  rotation?: { x: number; y: number; z: number };
+  rotation?: any;
   scale?: { x: number; y: number; z: number };
+  [key: string]: any;
 }
 
 interface FieldTwinLayer {
@@ -108,10 +122,10 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
         // Layers and StagedAssets are async downloads.
         const layers = ftData.layers || ftData.visualisationMaps;
         const layerCount = layers ? Object.keys(layers).length : 0;
-        // const stagedAssets = ftData.stagedAssets;
-        // const assetCount = stagedAssets ? Object.keys(stagedAssets).length : 0;
+        const stagedAssets = ftData.stagedAssets;
+        const assetCount = stagedAssets ? Object.keys(stagedAssets).length : 0;
         
-        const totalAsyncTasks = layerCount; // + assetCount;
+        const totalAsyncTasks = layerCount + assetCount;
         let completedTasks = 0;
         
         const updateProgress = (itemName: string) => {
@@ -215,15 +229,14 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
             }
         }
 
-        // 5. Staged Assets (Disabled per user request)
-        /*
+        // 5. Staged Assets
         if (ftData.stagedAssets && Object.keys(ftData.stagedAssets).length > 0) {
             const assetGroup = new THREE.Group();
             assetGroup.name = 'Staged Assets';
              // Load in parallel
              const promises = Object.values(ftData.stagedAssets).map(async (asset) => {
-                // Check inner asset model3dUrl
-                if (asset.asset && asset.asset.model3dUrl) {
+                // Check inner asset model3dUrl or model3durl
+                if (asset.asset && (asset.asset.model3dUrl || asset.asset.model3durl)) {
                     try {
                         const model = await this.createStagedAsset(asset);
                         if (model) assetGroup.add(model);
@@ -234,15 +247,14 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
                     }
                 } else {
                     updateProgress(asset.name || 'Skipped Asset');
-        }
-      });
-      await Promise.all(promises);
+                }
+            });
+            await Promise.all(promises);
 
-      if (assetGroup.children.length > 0) {
-        group.add(assetGroup);
-      }
-    }
-    */
+            if (assetGroup.children.length > 0) {
+                group.add(assetGroup);
+            }
+        }
 
     console.log(`FieldTwin parse complete. Returning group with ${group.children.length} children.`);
     return group;
@@ -354,6 +366,10 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
       }
       customGeo.setIndex(indices);
       customGeo.computeVertexNormals();
+      
+      // Speed up raycasting for large terrain
+      // @ts-ignore
+      if (customGeo.computeBoundsTree) customGeo.computeBoundsTree();
 
       // Create seabed-style material
       const material = await this.createSeabedMaterial(normalMapUrl, minZ, maxZ);
@@ -436,8 +452,8 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
     
-    // Base color - darker seabed (sandy-gray-brown)
-    const baseR = 48, baseG = 45, baseB = 38;
+    // Base color - organic seabed (sandy-gray-brown with a hint of green)
+    const baseR = 52, baseG = 55, baseB = 48;
     
     // Fill with base color
     ctx.fillStyle = `rgb(${baseR}, ${baseG}, ${baseB})`;
@@ -446,12 +462,21 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     const imageData = ctx.getImageData(0, 0, size, size);
     const data = imageData.data;
     
-    // Helper for tileable noise - using prime-ish multipliers and less regular waves
+    /**
+     * Organic noise generator that avoids axis-aligned artifacts (the "cross" pattern)
+     * uses integer-based sums/differences to ensure perfect tileability over 2PI.
+     */
     const getNoise = (nx: number, ny: number) => {
-      const v1 = Math.sin(nx * 1.0) * Math.cos(ny * 1.0);
-      const v2 = Math.sin(nx * 2.3 + ny * 0.5) * Math.cos(ny * 2.7 - nx * 0.3) * 0.5;
-      const v3 = Math.sin(nx * 5.1 - ny * 1.2) * Math.cos(ny * 4.9 + nx * 0.8) * 0.25;
-      return v1 + v2 + v3;
+      let n = 0;
+      // Layer 1: Large organic waves at an angle
+      n += Math.sin(nx * 1 + ny * 1) * Math.cos(nx * 1 - ny * 2) * 1.0;
+      // Layer 2: Medium details with prime-ish frequency mixing
+      n += Math.sin(nx * 3 - ny * 2) * Math.cos(nx * 2 + ny * 5) * 0.5;
+      // Layer 3: Finer variation
+      n += Math.sin(nx * 7 + ny * 3) * Math.cos(nx * 4 - ny * 7) * 0.25;
+      // Layer 4: High frequency ripples
+      n += Math.sin(nx * 13 - ny * 5) * Math.cos(nx * 8 + ny * 11) * 0.125;
+      return n;
     };
 
     for (let i = 0; i < data.length; i += 4) {
@@ -464,12 +489,15 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
       // Multi-scale organic noise
       const noise = getNoise(nx, ny);
       
-      // Soft low-frequency variation
-      const totalNoise = (noise * 15);
+      // High-frequency sand grain (randomness per pixel)
+      const grain = (Math.random() - 0.5) * 5;
+      
+      // Total noise influence
+      const totalNoise = (noise * 18) + grain;
       
       data[i] = Math.max(0, Math.min(255, baseR + totalNoise));
-      data[i + 1] = Math.max(0, Math.min(255, baseG + totalNoise * 0.95));
-      data[i + 2] = Math.max(0, Math.min(255, baseB + totalNoise * 0.85));
+      data[i + 1] = Math.max(0, Math.min(255, baseG + totalNoise * 0.98));
+      data[i + 2] = Math.max(0, Math.min(255, baseB + totalNoise * 0.9));
       data[i + 3] = 255;
     }
     
@@ -532,31 +560,44 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
   }
 
   private async createStagedAsset(asset: FieldTwinStagedAsset): Promise<THREE.Group | null> {
-    const url = asset.asset?.model3dUrl;
+    const url = asset.asset?.model3durl || asset.asset?.model3dUrl;
     if (!url) return null;
 
+    // Use initialState / initialSTate if available, otherwise fallback to top level x,y,z
+    const st = asset.initialState || asset.initialSTate;
+    const state = st ? {
+        x: st.x,
+        y: st.y,
+        z: st.z,
+        rotation: st.rotation
+    } : { 
+        x: asset.x || 0, 
+        y: asset.y || 0, 
+        z: asset.z || 0, 
+        rotation: typeof asset.rotation === 'number' ? asset.rotation : (asset.rotation?.z || 0)
+    };
+
     // Skip artifacts at 0,0,0
-    if (Math.abs(asset.x) < 0.01 && Math.abs(asset.y) < 0.01) {
+    if (Math.abs(state.x) < 0.01 && Math.abs(state.y) < 0.01) {
       return null;
     }
 
     // Position
-    const position = this.normalizeCoordinate(asset.x, asset.y, asset.z);
+    const position = this.normalizeCoordinate(state.x, state.y, state.z);
 
     // Rotation
-    // FT rotation usually Z-axis (heading).
-    // GLTFLoader takes Euler.
+    // FT rotation usually degrees (0=North, 90=East) - heading.
     const rotation = new THREE.Euler(0, 0, 0);
-    if (asset.rotation) {
-      if (asset.rotation.x) rotation.x = THREE.MathUtils.degToRad(asset.rotation.x);
-      // Mapping FT Z rotation to Three Y rotation (Vertical axis)
-      // And FT Y rotation to Three X/Z?
-      // Simplification: Just map Z->Y for heading as per shapes.
-      if (asset.rotation.z) rotation.y = THREE.MathUtils.degToRad(-asset.rotation.z);
+    const heading = state.rotation ?? 0;
+    
+    // Mapping FT Heading to Three.js Y-rotation
+    // FT: Clockwise. Three.js: Counter-clockwise.
+    rotation.y = THREE.MathUtils.degToRad(-heading);
 
-      // If there are other rotations, this might need adjustment based on specific FT coordinate system docs.
-      // Assuming flat world Z-up to Y-up transform is handled by position swap only using normalizeCoordinate, 
-      // but object orientation local axes need to be considered.
+    // Apply tilt/roll if present in asset.rotation object
+    if (typeof asset.rotation === 'object') {
+        if (asset.rotation.x) rotation.x = THREE.MathUtils.degToRad(asset.rotation.x);
+        if (asset.rotation.y) rotation.z = THREE.MathUtils.degToRad(asset.rotation.y);
     }
 
     // Scale
