@@ -21,7 +21,7 @@ export class GLTFLoader {
     this.loader.setDRACOLoader(dracoLoader);
   }
 
-  async load(url: string, position: THREE.Vector3 = new THREE.Vector3(), scale: THREE.Vector3 = new THREE.Vector3(1, 1, 1), rotation: THREE.Euler = new THREE.Euler()): Promise<THREE.Group> {
+  async load(url: string, position?: THREE.Vector3, scale?: THREE.Vector3, rotation?: THREE.Euler): Promise<THREE.Group> {
     if (!this.cache.has(url)) {
       this.cache.set(url, this.loadInternal(url));
     }
@@ -29,12 +29,10 @@ export class GLTFLoader {
     const original = await this.cache.get(url)!;
     const model = original.clone(true); // Clone the scene for reuse
 
-    // Apply transformations passed in arguments
-    // We use copy() because model might already have its own world-space position (which matches FieldTwin world)
-    // or be at 0,0,0 (local). In both cases, the target position from FieldTwin is the one to use.
-    model.position.copy(position);
-    model.scale.copy(scale);
-    model.rotation.copy(rotation);
+    // Apply transformations passed in arguments if provided
+    if (position) model.position.copy(position);
+    if (scale) model.scale.copy(scale);
+    if (rotation) model.rotation.copy(rotation);
 
     model.updateMatrixWorld(true);
 
@@ -49,57 +47,6 @@ export class GLTFLoader {
           const model = gltf.scene;
 
           model.updateMatrixWorld(true);
-          const box = new THREE.Box3().setFromObject(model);
-          const center = box.getCenter(new THREE.Vector3());
-
-          const originManager = OriginManager.getInstance();
-
-          // Search for 'center' in userData recursively
-          let userDataCenter: any = null;
-          model.traverse((child) => {
-            if (userDataCenter) return;
-            if (child.userData && child.userData.center) {
-              userDataCenter = child.userData.center;
-            }
-          });
-
-          // Check if userData defines a center (World Position)
-          if (userDataCenter) {
-            const c = userDataCenter;
-            // User data usually comes as X=East, Y=North, Z=Elevation
-            // We match GeoJSONLoader behavior: X->X, Y->Height(Y), Z->-North(-Z)
-            // If userData is {x, y, z} where y=North, z=Height:
-            // Vector3(x, z, -y) is correct.
-            const centerVec = new THREE.Vector3(c.x, c.z, -c.y);
-
-            // If no origin, and this is huge, set it
-            if (!originManager.hasOrigin() && centerVec.length() > 10000) {
-              originManager.setOrigin(centerVec);
-            }
-
-            if (originManager.hasOrigin()) {
-              // Geometry is local, but belongs at centerVec.
-              // Move to centerVec - Origin.
-              model.position.copy(centerVec).sub(originManager.getOrigin());
-            } else {
-              // No origin logic needed (small coords or first object is small)
-              model.position.copy(centerVec);
-            }
-          } else {
-            // Heuristic: If coordinates are huge (>10000), assume world coordinates.
-            if (center.length() > 10000) {
-              if (!originManager.hasOrigin()) {
-                originManager.setOrigin(center);
-              }
-
-              if (originManager.hasOrigin()) {
-                const origin = originManager.getOrigin();
-                // Assume GLB has world coordinates built into geometry (Vertices are huge).
-                // Shift model back by origin so vertices become local.
-                model.position.sub(origin);
-              }
-            }
-          }
 
           model.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
@@ -113,6 +60,51 @@ export class GLTFLoader {
               }
             }
           });
+
+          // Search for 'center' in userData recursively
+          let userDataCenter: any = null;
+          model.traverse((child) => {
+            if (userDataCenter) return;
+            if (child.userData && child.userData.center) {
+              userDataCenter = child.userData.center;
+            }
+          });
+
+          const originManager = OriginManager.getInstance();
+          
+          if (userDataCenter) {
+            const c = userDataCenter;
+            const centerVec = new THREE.Vector3(c.x, c.z, -c.y);
+
+            // If no origin, and this is far away, set it
+            if (!originManager.hasOrigin() && centerVec.length() > 1000) {
+              originManager.setOrigin(centerVec);
+            }
+
+            if (originManager.hasOrigin()) {
+              // Geometry is local, but belongs at centerVec. 
+              // Move to centerVec - Origin.
+              model.position.copy(centerVec).sub(originManager.getOrigin());
+            } else {
+              model.position.copy(centerVec);
+            }
+          } else {
+            // Heuristic for world-coordinate models without userData.center
+            const box = new THREE.Box3().setFromObject(model);
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+
+            // If no origin, and this is far away, set it
+            if (!originManager.hasOrigin() && center.length() > 1000) {
+              originManager.setOrigin(center);
+            }
+
+            if (originManager.hasOrigin() && center.length() > 1000) {
+              // Vertices are at world coords, subtract origin to bring to local space
+              model.position.sub(originManager.getOrigin());
+            }
+          }
+
           resolve(model);
         },
         undefined,

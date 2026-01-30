@@ -1,11 +1,22 @@
+* {
+  box-sizing: border-box;
+}
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
+  color-scheme: dark;
+  color: #e2e8f0;
   background-color: #242424;
+
+  /* Theme Colors */
+  --space-gray-dark: #1a1c1e;
+  --space-gray: #2d2f31;
+  --space-gray-light: #3f4245;
+  --accent-orange: #ff8c00;
+  --accent-orange-hover: #ffa500;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -17,6 +28,7 @@ body {
   margin: 0;
   overflow: hidden;
   position: relative;
+  background-color: var(--space-gray-dark);
 }
 
 canvas {
@@ -24,7 +36,176 @@ canvas {
   outline: none;
 }
 
-/* lil-gui custom tweak if needed, usually it sits top-right */
+/* Progress Box Styles */
+#loading-overlay {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  background-color: rgba(45, 47, 49, 0.9); /* space-gray */
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  z-index: 2000;
+  transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+  pointer-events: none;
+}
+
+#loading-overlay.fade-out {
+  opacity: 0;
+  transform: translate(-50%, -10px);
+}
+
+.loader-container {
+  width: 100%;
+}
+
+.loader-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.loader-bar-bg {
+  width: 100%;
+  height: 6px;
+  background-color: var(--space-gray-light);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.loader-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: var(--accent-orange);
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
+
+/* lil-gui custom tweak */
 .lil-gui { 
-    --name-width: 45%; 
+    --name-width: 45%;
+    --background-color: var(--space-gray-dark);
+    --header-color: var(--space-gray);
+    --title-background-color: var(--space-gray);
+    --title-text-color: #eee;
+    --widget-color: var(--space-gray-light);
+    --hover-color: var(--space-gray-light);
+    --focus-color: var(--space-gray-light);
+    --number-color: var(--accent-orange);
+    --string-color: var(--accent-orange);
+    --accent-color: var(--accent-orange);
+}
+
+.lil-gui .title {
+    border-bottom: 1px solid var(--accent-orange);
+}
+
+/* Custom Lil-GUI button styling */
+.lil-gui .controller.function button {
+    background: var(--space-gray-light);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    color: #eee;
+    font-weight: 500;
+    transition: all 0.2s;
+    margin: 2px 0;
+}
+
+.lil-gui .controller.function button:hover {
+    background: var(--space-gray);
+    color: var(--accent-orange);
+    border-color: var(--accent-orange);
+}
+
+.lil-gui .controller.function button:active {
+    background: var(--accent-orange) !important;
+    color: #000 !important;
+    transform: scale(0.96);
+}
+
+/* Modal Buttons */
+.ft-button-primary {
+  background-color: var(--accent-orange) !important;
+  color: #000 !important;
+  border: none !important;
+  padding: 10px 24px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.ft-button-primary:hover {
+  background-color: var(--accent-orange-hover) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  filter: brightness(1.1);
+}
+
+.ft-button-primary:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 2px 4px 0 rgba(0,0,0,0.1);
+  background-color: var(--accent-orange) !important;
+}
+
+.ft-button-secondary {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: #ccc !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 10px 20px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ft-button-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.ft-button-secondary:active {
+  background-color: var(--accent-orange) !important;
+  color: #000 !important;
+  border-color: var(--accent-orange) !important;
+  transform: scale(0.98);
+}
+
+/* Global Button Feedback for lil-gui and others */
+button:not(.ft-button-primary):not(.ft-button-secondary) {
+    transition: all 0.2s;
+}
+
+button:not(.ft-button-primary):not(.ft-button-secondary):hover {
+    filter: brightness(1.2);
+}
+
+button:not(.ft-button-primary):not(.ft-button-secondary):active {
+    background-color: var(--accent-orange) !important;
+    color: #000 !important;
+}
+
+.ft-button-secondary:active {
+  opacity: 0.7;
 }

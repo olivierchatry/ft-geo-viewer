@@ -99,162 +99,173 @@ export class FieldTwinLoader {
     this.gltfLoader = new GLTFLoader();
   }
 
-public async load(_url: string, payload: any, onProgress?: (message: string, percent: number) => void): Promise<THREE.Group> {
-        return this.parse(payload, onProgress);
+  public async load(_url: string, payload: any, onProgress?: (message: string, percent: number) => void): Promise<THREE.Group> {
+    return this.parse(payload, onProgress);
+  }
+
+  public async parse(data: any, onProgress?: (message: string, percent: number) => void): Promise<THREE.Group> {
+    console.log("Parsing FieldTwin Data with Staged Assets", data);
+    const group = new THREE.Group();
+    group.name = 'FieldTwin Layer';
+
+    const ftData = data as FieldTwinData;
+
+    // Debug Log
+    console.log(`FT Data Keys: ${Object.keys(ftData).join(', ')}`);
+    if (ftData.shapes) console.log(`Shapes: ${Object.keys(ftData.shapes).length}`);
+    if (ftData.wells) console.log(`Wells: ${Object.keys(ftData.wells).length}`);
+    if (ftData.connections) console.log(`Connections: ${Object.keys(ftData.connections).length}`);
+    if (ftData.layers) console.log(`Layers: ${Object.keys(ftData.layers).length}`);
+
+    // Calculate total tasks for progress
+    // Shapes/Connections/Wells are fast (sync), we treat them as initial setup (10%)
+    // Layers and StagedAssets are async downloads.
+    const layers = ftData.layers || ftData.visualisationMaps;
+    const layerCount = layers ? Object.keys(layers).length : 0;
+    const stagedAssets = ftData.stagedAssets;
+    const assetCount = stagedAssets ? Object.keys(stagedAssets).length : 0;
+
+    const totalAsyncTasks = layerCount + assetCount;
+    let completedTasks = 0;
+
+    const updateProgress = (itemName: string) => {
+      if (onProgress && totalAsyncTasks > 0) {
+        completedTasks++;
+        // Base 10% + remaining 90% distributed among async tasks
+        const percent = 10 + (completedTasks / totalAsyncTasks) * 90;
+        onProgress(`Loading ${itemName}...`, Math.min(percent, 100));
+      }
+    };
+
+    if (onProgress) onProgress("Parsing Shapes, Wells & Connections...", 5);
+
+    // 1. Shapes
+    if (ftData.shapes) {
+      const shapeGroup = new THREE.Group();
+      shapeGroup.name = 'Shapes';
+      Object.values(ftData.shapes).forEach((shape: any) => {
+        if (shape.visible === false) return;
+        try {
+          const mesh = this.createShape(shape);
+          if (mesh) shapeGroup.add(mesh);
+        } catch (e) {
+          console.warn("Error creating shape", e);
+        }
+      });
+      group.add(shapeGroup);
     }
 
-    public async parse(data: any, onProgress?: (message: string, percent: number) => void): Promise<THREE.Group> {
-        console.log("Parsing FieldTwin Data with Staged Assets", data);
-        const group = new THREE.Group();
-        group.name = 'FieldTwin Layer';
-        
-        const ftData = data as FieldTwinData;
+    // 2. Wells
+    if (ftData.wells) {
+      const wellGroup = new THREE.Group();
+      wellGroup.name = 'Wells';
+      let loadedWells = 0;
+      Object.values(ftData.wells).forEach((well: any) => {
+        if (well.visible === false) return;
+        try {
+          const mesh = this.createWell(well);
+          if (mesh) {
+            wellGroup.add(mesh);
+            loadedWells++;
+          }
+        } catch (e) {
+          console.warn("Error creating well", well, e);
+        }
+      });
+      console.log(`Loaded ${loadedWells} wells.`);
+      group.add(wellGroup);
+    }
 
-        // Debug Log
-        console.log(`FT Data Keys: ${Object.keys(ftData).join(', ')}`);
-        if (ftData.shapes) console.log(`Shapes: ${Object.keys(ftData.shapes).length}`);
-        if (ftData.wells) console.log(`Wells: ${Object.keys(ftData.wells).length}`);
-        if (ftData.connections) console.log(`Connections: ${Object.keys(ftData.connections).length}`);
-        if (ftData.layers) console.log(`Layers: ${Object.keys(ftData.layers).length}`);
+    // 3. Connections
+    if (ftData.connections) {
+      const connGroup = new THREE.Group();
+      connGroup.name = 'Connections';
+      Object.values(ftData.connections).forEach((conn: any) => {
+        if (conn.visible === false) return;
+        try {
+          const mesh = this.createConnection(conn);
+          if (mesh) connGroup.add(mesh);
+        } catch (e) {
+          console.warn("Error creating connection", e);
+        }
+      });
+      group.add(connGroup);
+    }
 
-        // Calculate total tasks for progress
-        // Shapes/Connections/Wells are fast (sync), we treat them as initial setup (10%)
-        // Layers and StagedAssets are async downloads.
-        const layers = ftData.layers || ftData.visualisationMaps;
-        const layerCount = layers ? Object.keys(layers).length : 0;
-        const stagedAssets = ftData.stagedAssets;
-        const assetCount = stagedAssets ? Object.keys(stagedAssets).length : 0;
-        
-        const totalAsyncTasks = layerCount + assetCount;
-        let completedTasks = 0;
-        
-        const updateProgress = (itemName: string) => {
-            if (onProgress && totalAsyncTasks > 0) {
-               completedTasks++;
-               // Base 10% + remaining 90% distributed among async tasks
-               const percent = 10 + (completedTasks / totalAsyncTasks) * 90;
-               onProgress(`Loading ${itemName}...`, Math.min(percent, 100));
+    if (onProgress) onProgress("Starting Downloads...", 10);
+
+    // 4. Layers (XVB)
+    if (layers && Object.keys(layers).length > 0) {
+      const mapGroup = new THREE.Group();
+      mapGroup.name = 'Terrain Layers';
+      // Load in parallel
+      const promises = Object.values(layers).map(async (layer) => {
+        if (layer.visible === false) {
+          updateProgress(layer.name || 'Skipped Layer');
+          return;
+        }
+        console.log(`Processing Layer: ${layer.name}, URL: ${layer.url}, isXVB: ${layer.isXVB}`);
+        console.log(`Layer full properties:`, Object.keys(layer), layer.urlNormalMap ? `urlNormalMap: ${layer.urlNormalMap}` : 'No urlNormalMap');
+        if (layer.url && layer.isXVB) {
+          try {
+            const mesh = await this.loadXvbLayer(layer);
+            if (mesh) {
+              mapGroup.add(mesh);
+              console.log(`Layer ${layer.name} added.`);
             }
-        };
+          } catch (e) {
+            console.error(`Failed to load Layer ${layer.name}`, e);
+          } finally {
+            updateProgress(layer.name || 'Layer');
+          }
+        } else {
+          // Add a placeholder for non-XVB layers so they appear in the scene graph (and UI)
+          const placeholder = new THREE.Group();
+          placeholder.name = layer.name || 'Unnamed Layer';
+          placeholder.userData = { ...layer, type: 'Placeholder/Overlay' };
+          mapGroup.add(placeholder);
 
-        if (onProgress) onProgress("Parsing Shapes, Wells & Connections...", 5);
-
-        // 1. Shapes
-        if (ftData.shapes) {
-            const shapeGroup = new THREE.Group();
-            shapeGroup.name = 'Shapes';
-            Object.values(ftData.shapes).forEach((shape: any) => {
-                try {
-                    const mesh = this.createShape(shape);
-                    if (mesh) shapeGroup.add(mesh);
-                } catch (e) {
-                    console.warn("Error creating shape", e);
-                }
-            });
-            group.add(shapeGroup);
+          console.log(`Skipping Layer Content ${layer.name || 'Unnamed'} (Not XVB or no URL), added placeholder.`);
+          updateProgress(layer.name || 'Skipped Layer');
         }
+      });
+      await Promise.all(promises);
 
-        // 2. Wells
-        if (ftData.wells) {
-            const wellGroup = new THREE.Group();
-            wellGroup.name = 'Wells';
-            let loadedWells = 0;
-            Object.values(ftData.wells).forEach((well: any) => {
-                try {
-                    const mesh = this.createWell(well);
-                    if (mesh) {
-                         wellGroup.add(mesh);
-                         loadedWells++;
-                    }
-                } catch (e) {
-                    console.warn("Error creating well", well, e);
-                }
-            });
-            console.log(`Loaded ${loadedWells} wells.`);
-            group.add(wellGroup);
+      if (mapGroup.children.length > 0) {
+        group.add(mapGroup);
+      }
+    }
+
+    // 5. Staged Assets
+    if (ftData.stagedAssets && Object.keys(ftData.stagedAssets).length > 0) {
+      const assetGroup = new THREE.Group();
+      assetGroup.name = 'Staged Assets';
+      // Load in parallel
+      const promises = Object.values(ftData.stagedAssets).map(async (asset) => {
+        if (asset.visible === false) {
+          updateProgress(asset.name || 'Skipped Asset');
+          return;
         }
-        
-        // 3. Connections
-        if (ftData.connections) {
-            const connGroup = new THREE.Group();
-            connGroup.name = 'Connections';
-            Object.values(ftData.connections).forEach((conn: any) => {
-                try {
-                    const mesh = this.createConnection(conn);
-                    if (mesh) connGroup.add(mesh);
-                } catch (e) {
-                    console.warn("Error creating connection", e);
-                }
-            });
-            group.add(connGroup);
+        // Check inner asset model3dUrl or model3durl
+        if (asset.asset && (asset.asset.model3dUrl || asset.asset.model3durl)) {
+          try {
+            const model = await this.createStagedAsset(asset);
+            if (model) assetGroup.add(model);
+          } catch (e) {
+            console.error(`Failed to load Staged Asset ${asset.name}`, e);
+          } finally {
+            updateProgress(asset.name || 'Asset');
+          }
+        } else {
+          updateProgress(asset.name || 'Skipped Asset');
         }
+      });
+      await Promise.all(promises);
 
-        if (onProgress) onProgress("Starting Downloads...", 10);
-
-        // 4. Layers (XVB)
-        if (layers && Object.keys(layers).length > 0) {
-            const mapGroup = new THREE.Group();
-            mapGroup.name = 'Terrain Layers';
-            // Load in parallel
-            const promises = Object.values(layers).map(async (layer) => {
-                console.log(`Processing Layer: ${layer.name}, URL: ${layer.url}, isXVB: ${layer.isXVB}`);
-                console.log(`Layer full properties:`, Object.keys(layer), layer.urlNormalMap ? `urlNormalMap: ${layer.urlNormalMap}` : 'No urlNormalMap');
-                if (layer.url && layer.isXVB) {
-                    try {
-                        const mesh = await this.loadXvbLayer(layer);
-                        if (mesh) {
-                             mapGroup.add(mesh);
-                             console.log(`Layer ${layer.name} added.`);
-                        }
-                    } catch (e) {
-                        console.error(`Failed to load Layer ${layer.name}`, e);
-                    } finally {
-                        updateProgress(layer.name || 'Layer');
-                    }
-                } else {
-                    // Add a placeholder for non-XVB layers so they appear in the scene graph (and UI)
-                    const placeholder = new THREE.Group();
-                    placeholder.name = layer.name || 'Unnamed Layer';
-                    placeholder.userData = { ...layer, type: 'Placeholder/Overlay' };
-                    mapGroup.add(placeholder);
-
-                    console.log(`Skipping Layer Content ${layer.name || 'Unnamed'} (Not XVB or no URL), added placeholder.`);
-                    updateProgress(layer.name || 'Skipped Layer');
-                }
-            });
-            await Promise.all(promises);
-            
-            if (mapGroup.children.length > 0) {
-                group.add(mapGroup);
-            }
-        }
-
-        // 5. Staged Assets
-        if (ftData.stagedAssets && Object.keys(ftData.stagedAssets).length > 0) {
-            const assetGroup = new THREE.Group();
-            assetGroup.name = 'Staged Assets';
-             // Load in parallel
-             const promises = Object.values(ftData.stagedAssets).map(async (asset) => {
-                // Check inner asset model3dUrl or model3durl
-                if (asset.asset && (asset.asset.model3dUrl || asset.asset.model3durl)) {
-                    try {
-                        const model = await this.createStagedAsset(asset);
-                        if (model) assetGroup.add(model);
-                    } catch (e) {
-                         console.error(`Failed to load Staged Asset ${asset.name}`, e);
-                    } finally {
-                        updateProgress(asset.name || 'Asset');
-                    }
-                } else {
-                    updateProgress(asset.name || 'Skipped Asset');
-                }
-            });
-            await Promise.all(promises);
-
-            if (assetGroup.children.length > 0) {
-                group.add(assetGroup);
-            }
-        }
+      if (assetGroup.children.length > 0) {
+        group.add(assetGroup);
+      }
+    }
 
     console.log(`FieldTwin parse complete. Returning group with ${group.children.length} children.`);
     return group;
@@ -264,7 +275,7 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     const url = layer.url;
     const name = layer.name;
     const normalMapUrl = layer.urlNormalMap;
-    
+
     try {
       const downloadedData = await this.fileLoader.loadAsync(url) as ArrayBuffer;
 
@@ -296,77 +307,115 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
 
       const heights = new Float32Array(downloadedData, 32);
 
-      if (heights.length !== width * height) {
+      if (heights.length < width * height) {
         console.warn("Height data length mismatch");
         return null;
       }
 
       const customGeo = new THREE.BufferGeometry();
+      (customGeo as any).isXvbGeometry = true;
+
+      const bboxSize = new THREE.Vector2(maxX - minX, maxY - minY);
+      const gridX = Math.floor(width - 1) || 1;
+      const gridY = Math.floor(height - 1) || 1;
+      const gridX1 = gridX + 1;
+      const gridY1 = gridY + 1;
+      const segmentWidth = bboxSize.x / gridX;
+      const segmentHeight = bboxSize.y / gridY;
+      const widthHalf = bboxSize.x * 0.5;
+      const heightHalf = bboxSize.y * 0.5;
+      const minHeight = minZ;
+
       const vertices = new Float32Array(width * height * 3);
+      const normals = new Float32Array(width * height * 3);
       const uvs = new Float32Array(width * height * 2);
 
+      let offset = 0;
+      let offset2 = 0;
+      let offset3 = 0;
+
+      // Range and center for mesh positioning (matches original logic)
       const rangeX = maxX - minX;
       const rangeY = maxY - minY;
-
-      const stepX = rangeX / (width - 1);
-      const stepY = rangeY / (height - 1);
-
-      // Center the grid for precision
       const centerX = minX + rangeX * 0.5;
       const centerY = minY + rangeY * 0.5;
-      
-      console.log(`XVB Loading: Size ${width}x${height}, Range X: ${rangeX}, Y: ${rangeY}, Center: ${centerX}, ${centerY}`);
-      
-      // Calculate mesh position (World Position)
       const meshPos = this.normalizeCoordinate(centerX, centerY, 0);
-      console.log(`XVB Mesh Position:`, meshPos);
 
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const i = y * width + x;
-          const h = heights[i]; // Elevation
+      for (let iy = 0; iy < gridY1; iy++) {
+        const yCoord = iy * segmentHeight - heightHalf;
+        for (let ix = 0; ix < gridX1; ix++) {
+          const xCoord = ix * segmentWidth - widthHalf;
 
-          // Data coords (Local to center)
-          const vx = (minX + x * stepX) - centerX;
-          const vy = (minY + y * stepY) - centerY;
-          const vz = h;
+          // Adapt to Y-up: [x, height, -y]
+          vertices[offset3] = xCoord;
+          vertices[offset3 + 1] = heights[offset];
+          vertices[offset3 + 2] = -yCoord;
 
-          // Our coordinate system mapping in normalizeCoordinate is: X, Z, -Y
-          // Since vz (elevation) corresponds to Y in Three.js and -vy corresponds to Z in Three.js (backwards)
-          // Actually check normalizeCoordinate: raw = (x, z + bias, -y).
-          // Local vertex:
-          // x -> vx
-          // y (up) -> vz
-          // z (back) -> -vy
+          normals[offset3] = 0;
+          normals[offset3 + 1] = 1;
+          normals[offset3 + 2] = 0;
 
-          vertices[i * 3 + 0] = vx;
-          vertices[i * 3 + 1] = vz;
-          vertices[i * 3 + 2] = -vy;
-          
-          // UV coordinates (0-1 range)
-          uvs[i * 2 + 0] = x / (width - 1);
-          uvs[i * 2 + 1] = y / (height - 1);
+          uvs[offset2] = ix / gridX;
+          uvs[offset2 + 1] = 1 - iy / gridY;
+
+          offset3 += 3;
+          offset2 += 2;
+          offset++;
         }
       }
 
+      offset = 0;
+      let count = 0;
+      for (let iy = 0; iy < gridY; iy++) {
+        for (let ix = 0; ix < gridX; ix++) {
+          const a = ix + gridX1 * iy;
+          const b = ix + gridX1 * (iy + 1);
+          const c = ix + 1 + gridX1 * (iy + 1);
+          const d = ix + 1 + gridX1 * iy;
+
+          if (heights[b] >= minHeight && heights[d] >= minHeight) {
+            if (heights[a] >= minHeight) {
+              count++;
+            }
+            if (heights[c] >= minHeight) {
+              count++;
+            }
+          }
+        }
+      }
+
+      const indices = new (vertices.length / 3 > 65535 ? Uint32Array : Uint16Array)(count * 3);
+
+      offset = 0;
+      for (let iy = 0; iy < gridY; iy++) {
+        for (let ix = 0; ix < gridX; ix++) {
+          const a = ix + gridX1 * iy;
+          const b = ix + gridX1 * (iy + 1);
+          const c = ix + 1 + gridX1 * (iy + 1);
+          const d = ix + 1 + gridX1 * iy;
+
+          if (heights[b] >= minHeight && heights[d] >= minHeight) {
+            if (heights[a] >= minHeight) {
+              indices[offset] = b;
+              indices[offset + 1] = a;
+              indices[offset + 2] = d;
+              offset += 3;
+            }
+            if (heights[c] >= minHeight) {
+              indices[offset + 0] = c;
+              indices[offset + 1] = b;
+              indices[offset + 2] = d;
+              offset += 3;
+            }
+          }
+        }
+      }
+
+      customGeo.setIndex(new THREE.BufferAttribute(indices, 1));
       customGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+      customGeo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       customGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 
-      const indices = [];
-      for (let y = 0; y < height - 1; y++) {
-        for (let x = 0; x < width - 1; x++) {
-          const a = y * width + x;
-          const b = y * width + x + 1;
-          const c = (y + 1) * width + x;
-          const d = (y + 1) * width + x + 1;
-
-          indices.push(a, b, d);
-          indices.push(d, c, a);
-        }
-      }
-      customGeo.setIndex(indices);
-      customGeo.computeVertexNormals();
-      
       // Speed up raycasting for large terrain
       // @ts-ignore
       if (customGeo.computeBoundsTree) customGeo.computeBoundsTree();
@@ -377,16 +426,16 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
       const mesh = new THREE.Mesh(customGeo, material);
       mesh.name = name || 'XVB Terrain';
       mesh.position.copy(meshPos);
-      
+
       // Ensure the mesh is not frustrated by frustum culling if the bounding box is not updated or large
-      mesh.frustumCulled = false; 
+      mesh.frustumCulled = false;
 
       // Debug Bounding Box
       customGeo.computeBoundingBox();
       if (customGeo.boundingBox) {
-          const min = customGeo.boundingBox.min.clone().add(mesh.position);
-          const max = customGeo.boundingBox.max.clone().add(mesh.position);
-          console.log(`XVB Layer World Bounds: Min(${min.x.toFixed(0)}, ${min.y.toFixed(0)}, ${min.z.toFixed(0)}) Max(${max.x.toFixed(0)}, ${max.y.toFixed(0)}, ${max.z.toFixed(0)})`);
+        const min = customGeo.boundingBox.min.clone().add(mesh.position);
+        const max = customGeo.boundingBox.max.clone().add(mesh.position);
+        console.log(`XVB Layer World Bounds: Min(${min.x.toFixed(0)}, ${min.y.toFixed(0)}, ${min.z.toFixed(0)}) Max(${max.x.toFixed(0)}, ${max.y.toFixed(0)}, ${max.z.toFixed(0)})`);
       }
 
       return mesh;
@@ -403,25 +452,25 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
    */
   private async createSeabedMaterial(normalMapUrl?: string, minElev?: number, maxElev?: number): Promise<THREE.Material> {
     const textureLoader = new THREE.TextureLoader();
-    
+
     // Generate procedural seabed diffuse texture
     const diffuseTexture = this.generateSeabedTexture(512);
     diffuseTexture.wrapS = THREE.RepeatWrapping;
     diffuseTexture.wrapT = THREE.RepeatWrapping;
     const repeatScale = 4; // Lower repeat = less moire
     diffuseTexture.repeat.set(repeatScale, repeatScale);
-    
+
     // Enable anisotropic filtering to prevent moire at sharp angles
     diffuseTexture.anisotropy = 16;
     diffuseTexture.minFilter = THREE.LinearMipmapLinearFilter;
-    
+
     const materialParams: THREE.MeshStandardMaterialParameters = {
       map: diffuseTexture,
       roughness: 0.95,
       metalness: 0.0,
       side: THREE.DoubleSide,
     };
-    
+
     // Load normal map if URL provided
     if (normalMapUrl) {
       try {
@@ -438,10 +487,10 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
         console.warn(`Failed to load normal map: ${e}`);
       }
     }
-    
+
     return new THREE.MeshStandardMaterial(materialParams);
   }
-  
+
   /**
    * Generates a procedural seabed texture (sandy/muddy seafloor appearance)
    * Designed to be organic, sandy, and tileable without visible moire patterns.
@@ -451,17 +500,17 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
-    
+
     // Base color - organic seabed (invert R and B per user feedback)
     const baseR = 48, baseG = 55, baseB = 52;
-    
+
     // Fill with base color
     ctx.fillStyle = `rgb(${baseR}, ${baseG}, ${baseB})`;
     ctx.fillRect(0, 0, size, size);
-    
+
     const imageData = ctx.getImageData(0, 0, size, size);
     const data = imageData.data;
-    
+
     /**
      * Organic noise generator that avoids axis-aligned artifacts (the "cross" pattern)
      * uses integer-based sums/differences to ensure perfect tileability over 2PI.
@@ -482,33 +531,33 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     for (let i = 0; i < data.length; i += 4) {
       const x = (i / 4) % size;
       const y = Math.floor((i / 4) / size);
-      
+
       const nx = (x / size) * Math.PI * 2;
       const ny = (y / size) * Math.PI * 2;
-      
+
       // Multi-scale organic noise
       const noise = getNoise(nx, ny);
-      
+
       // High-frequency sand grain (randomness per pixel)
       const grain = (Math.random() - 0.5) * 5;
-      
+
       // Total noise influence
       const totalNoise = (noise * 18) + grain;
-      
+
       // RGBA order - inverting R and B here too just in case it's a systemic texture interpretation issue
       data[i] = Math.max(0, Math.min(255, baseB + totalNoise * 0.9));
       data[i + 1] = Math.max(0, Math.min(255, baseG + totalNoise * 0.98));
       data[i + 2] = Math.max(0, Math.min(255, baseR + totalNoise));
       data[i + 3] = 255;
     }
-    
+
     // Add subtle procedural "clump" variation but much softer
     for (let spot = 0; spot < 40; spot++) {
       const sx = Math.random() * size;
       const sy = Math.random() * size;
       const radius = 2 + Math.random() * 6;
       const darkness = 0.05 + Math.random() * 0.1;
-      
+
       for (let dy = -radius; dy <= radius; dy++) {
         for (let dx = -radius; dx <= radius; dx++) {
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -516,7 +565,7 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
             const px = (Math.floor(sx + dx) + size) % size;
             const py = (Math.floor(sy + dy) + size) % size;
             const idx = (py * size + px) * 4;
-            
+
             const factor = 1.0 - (darkness * (1.0 - dist / radius));
             data[idx] *= factor;
             data[idx + 1] *= factor;
@@ -525,9 +574,9 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
         }
       }
     }
-    
+
     ctx.putImageData(imageData, 0, 0);
-    
+
     // Final soften/blur to eliminate any pixel-level aliasing (main cause of moire)
     ctx.globalAlpha = 0.4;
     ctx.drawImage(canvas, 1, 0);
@@ -535,7 +584,7 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     ctx.drawImage(canvas, 0, 1);
     ctx.drawImage(canvas, 0, -1);
     ctx.globalAlpha = 1.0;
-    
+
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
     return texture;
@@ -567,15 +616,15 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     // Use initialState / initialSTate if available, otherwise fallback to top level x,y,z
     const st = asset.initialState || asset.initialSTate;
     const state = st ? {
-        x: st.x,
-        y: st.y,
-        z: st.z,
-        rotation: st.rotation
-    } : { 
-        x: asset.x || 0, 
-        y: asset.y || 0, 
-        z: asset.z || 0, 
-        rotation: typeof asset.rotation === 'number' ? asset.rotation : (asset.rotation?.z || 0)
+      x: st.x,
+      y: st.y,
+      z: st.z,
+      rotation: st.rotation
+    } : {
+      x: asset.x || 0,
+      y: asset.y || 0,
+      z: asset.z || 0,
+      rotation: typeof asset.rotation === 'number' ? asset.rotation : (asset.rotation?.z || 0)
     };
 
     // Skip artifacts at 0,0,0
@@ -590,15 +639,15 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     // FT rotation usually degrees (0=North, 90=East) - heading.
     const rotation = new THREE.Euler(0, 0, 0);
     const heading = state.rotation ?? 0;
-    
+
     // Mapping FT Heading to Three.js Y-rotation
     // FT: Clockwise. Three.js: Counter-clockwise.
     rotation.y = THREE.MathUtils.degToRad(-heading);
 
     // Apply tilt/roll if present in asset.rotation object
     if (typeof asset.rotation === 'object') {
-        if (asset.rotation.x) rotation.x = THREE.MathUtils.degToRad(asset.rotation.x);
-        if (asset.rotation.y) rotation.z = THREE.MathUtils.degToRad(asset.rotation.y);
+      if (asset.rotation.x) rotation.x = THREE.MathUtils.degToRad(asset.rotation.x);
+      if (asset.rotation.y) rotation.z = THREE.MathUtils.degToRad(asset.rotation.y);
     }
 
     // Scale
@@ -685,14 +734,15 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
 
   private createWell(well: FieldTwinWell): THREE.Object3D | null {
     if (!well.path || well.path.length === 0) {
-        // Log keys for the first few errors to debug data structure
-        console.warn("Well missing path. Available keys:", Object.keys(well));
-        return null;
+      // Log keys for the first few errors to debug data structure
+      console.warn("Well missing path. Available keys:", Object.keys(well));
+      return null;
     }
 
     const points: THREE.Vector3[] = [];
     well.path.forEach(p => {
-      points.push(this.normalizeCoordinate(p.x, p.y, p.z));
+      // Well path Z is depth (positive going down), so negate it for elevation
+      points.push(this.normalizeCoordinate(p.x, p.y, -p.z));
     });
 
     if (points.length < 2) return null;
@@ -701,14 +751,14 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     const curve = new THREE.CatmullRomCurve3(points);
     const radius = well.radius !== undefined ? well.radius : 1;
     const tubularSegments = Math.max(64, points.length * 2);
-    
+
     const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 8, false);
 
     const colorVal = this.fixColor(well.color) || '#ff0000';
-    const material = new THREE.MeshStandardMaterial({ 
-        color: colorVal, 
-        roughness: 0.6,
-        metalness: 0.2
+    const material = new THREE.MeshStandardMaterial({
+      color: colorVal,
+      roughness: 0.6,
+      metalness: 0.2
     });
 
     const mesh = new THREE.Mesh(geometry, material);

@@ -12,19 +12,43 @@ const gltfLoader = new GLTFLoader();
 const geoJsonLoader = new GeoJSONLoader();
 const fieldTwinLoader = new FieldTwinLoader();
 
+// --- Loading Helper ---
+const loaderOverlay = document.getElementById('loading-overlay');
+const loaderText = document.getElementById('loader-text');
+const loaderBar = document.getElementById('loader-bar');
+
+function setLoader(msg: string, percent?: number) {
+  if (!loaderOverlay) return;
+  loaderOverlay.classList.remove('fade-out');
+  if (loaderText) {
+    loaderText.innerText = msg;
+    loaderText.title = msg; // Show full text on hover if truncated
+  }
+  if (loaderBar && percent !== undefined) loaderBar.style.width = `${percent}%`;
+}
+
+function hideLoader() {
+  if (loaderOverlay) loaderOverlay.classList.add('fade-out');
+}
+
+// Initial hide (engine only)
+setTimeout(hideLoader, 1000); 
+
 // --- Coordinate Display ---
 const coordsDiv = document.createElement('div');
 coordsDiv.style.position = 'absolute';
 coordsDiv.style.bottom = '10px';
 coordsDiv.style.left = '10px';
-coordsDiv.style.color = 'white';
-coordsDiv.style.backgroundColor = 'rgba(0,0,0,0.5)';
+coordsDiv.style.color = '#eee';
+coordsDiv.style.backgroundColor = 'rgba(26, 28, 30, 0.7)';
 coordsDiv.style.padding = '5px 10px';
+coordsDiv.style.border = '1px solid rgba(255, 255, 255, 0.1)';
 coordsDiv.style.borderRadius = '4px';
 coordsDiv.style.fontFamily = 'monospace';
+coordsDiv.style.fontSize = '12px';
 coordsDiv.style.userSelect = 'none';
 coordsDiv.style.pointerEvents = 'none'; // Click through
-coordsDiv.innerText = 'X: 0.00, Y: 0.00, Z: 0.00';
+coordsDiv.innerText = 'E: 0.00, N: 0.00, H: 0.00';
 document.body.appendChild(coordsDiv);
 
 // Raycaster for coordinates
@@ -101,9 +125,7 @@ const params = {
   loadGeoJSON: () => document.getElementById('geojsonInput')?.click(),
   loadFieldTwin: () => { ftModal.style.display = 'flex'; },
   resetCamera: () => {
-    world.camera.position.set(0, 500, 500);
-    world.camera.lookAt(0, 0, 0);
-    world.controls.target.set(0, 0, 0);
+    world.setView(new THREE.Vector3(0, 500, 500), new THREE.Vector3(0, 0, 0), true);
   },
   clearScene: () => {
     location.reload();
@@ -145,29 +167,43 @@ ftModal.style.position = 'fixed';
 ftModal.style.top = '50%';
 ftModal.style.left = '50%';
 ftModal.style.transform = 'translate(-50%, -50%)';
-ftModal.style.backgroundColor = '#222';
+ftModal.style.backgroundColor = '#1a1c1e'; // space-gray-dark
 ftModal.style.padding = '20px';
-ftModal.style.border = '1px solid #444';
+ftModal.style.border = '1px solid #ff8c00'; // accent-orange
 ftModal.style.borderRadius = '8px';
 ftModal.style.zIndex = '1000';
 ftModal.style.display = 'none';
 ftModal.style.flexDirection = 'column';
-ftModal.style.gap = '10px';
+ftModal.style.gap = '15px';
 ftModal.style.width = '80%';
 ftModal.style.maxWidth = '600px';
+ftModal.style.maxHeight = '90vh';
+ftModal.style.overflowY = 'auto';
+ftModal.style.boxSizing = 'border-box';
+ftModal.style.boxShadow = '0 20px 50px rgba(0,0,0,0.5)';
 
 const ftLabel = document.createElement('label');
-ftLabel.innerText = 'Paste FieldTwin API cURL Command:';
-ftLabel.style.color = '#eee';
+ftLabel.innerText = 'FieldTwin API cURL Command:';
+ftLabel.style.color = '#ff8c00';
+ftLabel.style.fontWeight = '600';
+ftLabel.style.fontSize = '12px';
+ftLabel.style.textTransform = 'uppercase';
+ftLabel.style.letterSpacing = '1px';
 ftModal.appendChild(ftLabel);
 
 const ftTextarea = document.createElement('textarea');
-ftTextarea.rows = 10;
+ftTextarea.rows = 8;
 ftTextarea.style.width = '100%';
 ftTextarea.style.backgroundColor = '#111';
 ftTextarea.style.color = '#ccc';
-ftTextarea.style.border = '1px solid #555';
+ftTextarea.style.border = '1px solid #333';
+ftTextarea.style.padding = '10px';
+ftTextarea.style.borderRadius = '4px';
 ftTextarea.style.fontFamily = 'monospace';
+ftTextarea.style.fontSize = '12px';
+ftTextarea.style.outline = 'none';
+ftTextarea.style.resize = 'vertical';
+ftTextarea.style.boxSizing = 'border-box';
 ftTextarea.placeholder = "curl 'https://...' -H 'authorization: Bearer ...'";
 ftModal.appendChild(ftTextarea);
 
@@ -177,11 +213,13 @@ ftButtons.style.justifyContent = 'flex-end';
 ftButtons.style.gap = '10px';
 
 const ftCancel = document.createElement('button');
-ftCancel.innerText = 'Cancel';
+ftCancel.innerText = 'CANCEL';
+ftCancel.className = 'ft-button-secondary';
 ftCancel.onclick = () => { ftModal.style.display = 'none'; ftTextarea.value = ''; };
 
 const ftLoad = document.createElement('button');
-ftLoad.innerText = 'Load';
+ftLoad.innerText = 'LOAD DATA';
+ftLoad.className = 'ft-button-primary';
 ftLoad.onclick = async () => {
   const cmd = ftTextarea.value;
   ftModal.style.display = 'none';
@@ -194,14 +232,19 @@ ftLoad.onclick = async () => {
   const tokenMatch = cmd.match(/-H\s+['"]authorization:\s*Bearer\s+([^'"]+)['"]/i);
 
   if (urlMatch && tokenMatch) {
-    const url = urlMatch[1];
+    let url = urlMatch[1];
+    
+    // Cleanup URL: only keep up to subProject/{id}
+    const subProjectMatch = url.match(/(.*\/subProjects?\/[^/]+)/i);
+    if (subProjectMatch) {
+      url = subProjectMatch[1];
+    }
+
     const token = tokenMatch[1];
     try {
       console.log(`Fetching FieldTwin Data...`);
       
-      progressContainer.style.display = 'block';
-      progressLabel.innerText = "Fetching Manifest...";
-      progressBar.value = 0;
+      setLoader("Connecting to FieldTwin API...", 10);
 
       const response = await fetch(url, {
         headers: {
@@ -217,8 +260,7 @@ ftLoad.onclick = async () => {
       const json = await response.json();
     
       const group = await fieldTwinLoader.load(url, json, (msg, percent) => {
-           progressLabel.innerText = msg;
-           progressBar.value = percent;
+           setLoader(msg, percent);
       });
 
       console.log('FieldTwin Loader returned group:', group);
@@ -242,7 +284,7 @@ ftLoad.onclick = async () => {
       console.error(e);
       alert('Failed to load FieldTwin data check console');
     } finally {
-       progressContainer.style.display = 'none';
+       hideLoader();
     }
   } else {
     alert('Could not parse cURL command. Ensure it has URL and Authorization header.');
@@ -254,43 +296,15 @@ ftButtons.appendChild(ftLoad);
 ftModal.appendChild(ftButtons);
 document.body.appendChild(ftModal);
 
-// --- Progress Bar ---
-const progressContainer = document.createElement('div');
-progressContainer.style.position = 'absolute';
-progressContainer.style.top = '50%';
-progressContainer.style.left = '50%';
-progressContainer.style.transform = 'translate(-50%, -50%)';
-progressContainer.style.width = '300px';
-progressContainer.style.padding = '20px';
-progressContainer.style.background = 'rgba(0, 0, 0, 0.8)';
-progressContainer.style.borderRadius = '8px';
-progressContainer.style.zIndex = '1000';
-progressContainer.style.display = 'none';
-progressContainer.style.textAlign = 'center';
-progressContainer.style.color = 'white';
-progressContainer.style.fontFamily = 'Arial, sans-serif';
-
-const progressLabel = document.createElement('div');
-progressLabel.innerText = 'Loading...';
-progressLabel.style.marginBottom = '10px';
-progressContainer.appendChild(progressLabel);
-
-const progressBar = document.createElement('progress');
-progressBar.style.width = '100%';
-progressBar.value = 0;
-progressBar.max = 100;
-progressContainer.appendChild(progressBar);
-
-document.body.appendChild(progressContainer);
-
-
 // --- Layer Management ---
 
 function addLayerToGUI(name: string, object: THREE.Object3D) {
   const folder = layersFolder.addFolder(name);
 
   // Visibility toggle for the whole layer
-  folder.add(object, 'visible').name('Show Layer');
+  folder.add(object, 'visible').name('Show Layer').onChange(() => {
+    world.requestRender();
+  });
 
   // Remove button
   const layerControls = {
@@ -327,6 +341,7 @@ function addLayerToGUI(name: string, object: THREE.Object3D) {
         }
       }
     });
+    world.requestRender();
   });
 
   folder.add(layerControls, 'lineSize', 1, 20).name('Line Size').onChange((val: number) => {
@@ -352,6 +367,7 @@ function addLayerToGUI(name: string, object: THREE.Object3D) {
         }
       }
     });
+    world.requestRender();
   });
 
 
@@ -367,7 +383,9 @@ function addLayerToGUI(name: string, object: THREE.Object3D) {
       if (child.parent === object) {
         if (count < 50) { // Limit to 50 items to prevent UI lag
           const childName = child.name || `Element ${count + 1}`;
-          childrenFolder.add(child, 'visible').name(childName);
+          childrenFolder.add(child, 'visible').name(childName).onChange(() => {
+            world.requestRender();
+          });
         }
         count++;
       }
@@ -400,20 +418,25 @@ async function processFile(file: File) {
 
   try {
     let object: THREE.Object3D | null = null;
+    setLoader(`Loading ${filename}...`, 20);
 
     if (filename.toLowerCase().endsWith('.glb') || filename.toLowerCase().endsWith('.gltf')) {
       object = await gltfLoader.load(url);
+      setLoader(`Processing ${filename}...`, 80);
       console.log('Loaded GLB:', filename);
     }
     else if (filename.toLowerCase().endsWith('.json') || filename.endsWith('.geojson')) {
       // Read text for GeoJSON
       const text = await file.text();
       const json = JSON.parse(text);
+      setLoader(`Parsing ${filename}...`, 50);
       object = geoJsonLoader.parse(json);
+      setLoader(`Generating Geometry...`, 80);
       console.log('Loaded GeoJSON:', filename);
     } else {
       console.warn('Unknown file type:', filename);
       alert('Unknown file type: ' + filename);
+      hideLoader();
       return;
     }
 
@@ -427,6 +450,8 @@ async function processFile(file: File) {
   } catch (err) {
     console.error('Error processing file:', err);
     alert('Error loading file: ' + filename);
+  } finally {
+    hideLoader();
   }
 }
 
@@ -441,9 +466,8 @@ function fitCameraToObject(object: THREE.Object3D) {
     // If it's the first object or ground, maybe we want to look at it from top
     // With MapControls, usually we look at target.
 
-    world.controls.target.copy(center);
-    world.camera.position.set(center.x, center.y + maxDim, center.z + maxDim);
-    world.controls.update();
+    const camPos = new THREE.Vector3(center.x, center.y + maxDim, center.z + maxDim);
+    world.setView(camPos, center, true);
   }
 }
 
