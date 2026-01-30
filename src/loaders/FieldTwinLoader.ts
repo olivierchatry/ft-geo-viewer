@@ -452,8 +452,8 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
     
-    // Base color - organic seabed (sandy-gray-brown with a hint of green)
-    const baseR = 52, baseG = 55, baseB = 48;
+    // Base color - organic seabed (invert R and B per user feedback)
+    const baseR = 48, baseG = 55, baseB = 52;
     
     // Fill with base color
     ctx.fillStyle = `rgb(${baseR}, ${baseG}, ${baseB})`;
@@ -495,9 +495,10 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
       // Total noise influence
       const totalNoise = (noise * 18) + grain;
       
-      data[i] = Math.max(0, Math.min(255, baseR + totalNoise));
+      // RGBA order - inverting R and B here too just in case it's a systemic texture interpretation issue
+      data[i] = Math.max(0, Math.min(255, baseB + totalNoise * 0.9));
       data[i + 1] = Math.max(0, Math.min(255, baseG + totalNoise * 0.98));
-      data[i + 2] = Math.max(0, Math.min(255, baseB + totalNoise * 0.9));
+      data[i + 2] = Math.max(0, Math.min(255, baseR + totalNoise));
       data[i + 3] = 255;
     }
     
@@ -615,6 +616,18 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     return model;
   }
 
+  /**
+   * Helper to fix FieldTwin colors that might have inverted R and B (BGR format)
+   */
+  private fixColor(hex?: string): string {
+    if (!hex || !hex.startsWith('#') || hex.length !== 7) return hex || '#cccccc';
+    // Swap R and B: #RRGGBB -> #BBGGRR
+    const r = hex.substring(1, 3);
+    const g = hex.substring(3, 5);
+    const b = hex.substring(5, 7);
+    return `#${b}${g}${r}`;
+  }
+
   private createShape(shape: FieldTwinShape): THREE.Object3D | null {
     // Skip artifacts at 0,0,0
     if (Math.abs(shape.x) < 0.01 && Math.abs(shape.y) < 0.01) {
@@ -623,7 +636,7 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
 
     let geometry: THREE.BufferGeometry | undefined;
     // Default color white if missing
-    const colorVal = shape.color && shape.color.startsWith('#') ? shape.color : '#cccccc';
+    const colorVal = this.fixColor(shape.color);
     let material = new THREE.MeshStandardMaterial({
       color: colorVal,
       roughness: 0.7,
@@ -691,7 +704,7 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
     
     const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 8, false);
 
-    const colorVal = well.color && well.color.startsWith('#') ? well.color : '#ff0000';
+    const colorVal = this.fixColor(well.color) || '#ff0000';
     const material = new THREE.MeshStandardMaterial({ 
         color: colorVal, 
         roughness: 0.6,
@@ -715,8 +728,8 @@ public async load(_url: string, payload: any, onProgress?: (message: string, per
 
     if (points.length < 2) return null;
 
-    const typeColor = conn.connectionType?.color;
-    let colorVal = typeColor && typeColor.startsWith('#') ? typeColor : (conn.color && conn.color.startsWith('#') ? conn.color : '#ffff00');
+    const typeColor = this.fixColor(conn.connectionType?.color);
+    let colorVal = typeColor !== '#cccccc' ? typeColor : (this.fixColor(conn.color) || '#ffff00');
 
     // Use Line2 for thick lines (LineBasicMaterial linewidth doesn't work in WebGL)
     const positions: number[] = [];
