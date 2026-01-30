@@ -251,7 +251,7 @@ ftLoad.onclick = async () => {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/json',
           'simplify': "true",
-          "sample-every": 1
+          "sample-every": "1"
         }
       });
 

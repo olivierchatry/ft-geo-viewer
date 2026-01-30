@@ -83,7 +83,7 @@ interface FieldTwinData {
   shapes: Record<string, FieldTwinShape>;
   stagedAssets?: Record<string, FieldTwinStagedAsset>;
   layers?: Record<string, FieldTwinLayer>;
-  visualisationMaps?: Record<string, { url: string; name?: string }>;
+  visualisationMaps?: Record<string, FieldTwinLayer>;
   wells?: Record<string, FieldTwinWell>;
 }
 
@@ -450,7 +450,7 @@ export class FieldTwinLoader {
   /**
    * Creates a seabed-style material with optional normal map
    */
-  private async createSeabedMaterial(normalMapUrl?: string, minElev?: number, maxElev?: number): Promise<THREE.Material> {
+  private async createSeabedMaterial(normalMapUrl?: string, _minElev?: number, _maxElev?: number): Promise<THREE.Material> {
     const textureLoader = new THREE.TextureLoader();
 
     // Generate procedural seabed diffuse texture
