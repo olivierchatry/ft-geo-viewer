@@ -1,4 +1,13 @@
-import * as THREE from 'three';
+import { 
+  PerspectiveCamera, 
+  Scene, 
+  Raycaster, 
+  Vector2, 
+  Vector3, 
+  Plane, 
+  Euler, 
+  MathUtils 
+} from 'three';
 
 const NAVIGATION_STATE = {
   NONE: -1,
@@ -11,34 +20,34 @@ const NAVIGATION_STATE = {
  * Custom camera controller for geo viewer
  */
 export class CameraController {
-  camera: THREE.PerspectiveCamera;
+  camera: PerspectiveCamera;
   
   private domElement: HTMLElement;
-  private scene: THREE.Scene;
-  private raycaster: THREE.Raycaster;
-  private mouse: THREE.Vector2 = new THREE.Vector2();
+  private scene: Scene;
+  private raycaster: Raycaster;
+  private mouse: Vector2 = new Vector2();
   
   private navigationState: number = NAVIGATION_STATE.NONE;
-  private navigationCenter: THREE.Vector3 = new THREE.Vector3();
-  private panPlane: THREE.Plane = new THREE.Plane();
+  private navigationCenter: Vector3 = new Vector3();
+  private panPlane: Plane = new Plane();
   private maxPanDistance: number = 1000000;
   
-  private prevMouse: THREE.Vector2 = new THREE.Vector2();
+  private prevMouse: Vector2 = new Vector2();
   
   // Settings
   private zoomSpeed: number = 0.01;
   private minDistance: number = 1;
 
-  public target: THREE.Vector3 = new THREE.Vector3();
+  public target: Vector3 = new Vector3();
 
   // Flag to indicate render is needed
   private needsRender: boolean = false;
 
-  constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, scene: THREE.Scene) {
+  constructor(camera: PerspectiveCamera, domElement: HTMLElement, scene: Scene) {
     this.camera = camera;
     this.domElement = domElement;
     this.scene = scene;
-    this.raycaster = new THREE.Raycaster();
+    this.raycaster = new Raycaster();
     
     this.setupEventListeners();
   }
@@ -88,7 +97,7 @@ export class CameraController {
     this.prevMouse.set(event.clientX, event.clientY);
 
     if (this.navigationState === NAVIGATION_STATE.ROTATE) {
-      this.rotate(new THREE.Vector2(deltaX * -0.01, deltaY * -0.01));
+      this.rotate(new Vector2(deltaX * -0.01, deltaY * -0.01));
     } else if (this.navigationState === NAVIGATION_STATE.ZOOM) {
       this.zoom(deltaY);
     } else if (this.navigationState === NAVIGATION_STATE.PAN) {
@@ -115,7 +124,7 @@ export class CameraController {
     this.zoom(input);
   }
 
-  private setNavigationCenter(ndc: THREE.Vector2, applyPenetrationOffset: boolean = false) {
+  private setNavigationCenter(ndc: Vector2, applyPenetrationOffset: boolean = false) {
     const rayOffset = applyPenetrationOffset ? 10 : 0; // Fixed penetration distance
     const hitPoint = this.raycast(ndc, rayOffset);
     this.navigationCenter.copy(hitPoint);
@@ -128,7 +137,7 @@ export class CameraController {
     this.maxPanDistance = distToPlane * 60;
   }
 
-  private raycast(ndc: THREE.Vector2, rayOffset: number = 0): THREE.Vector3 {
+  private raycast(ndc: Vector2, rayOffset: number = 0): Vector3 {
     this.camera.updateMatrixWorld();
     this.raycaster.setFromCamera(ndc, this.camera);
     
@@ -144,29 +153,29 @@ export class CameraController {
     }
     
     // Fallback: Plane at target height (or y=0)
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const intersection = new THREE.Vector3();
+    const plane = new Plane(new Vector3(0, 1, 0), 0);
+    const intersection = new Vector3();
     if (this.raycaster.ray.intersectPlane(plane, intersection)) {
       return intersection;
     }
 
     // Secondary fallback: point at fixed distance
-    const fallbackPoint = new THREE.Vector3();
+    const fallbackPoint = new Vector3();
     this.raycaster.ray.at(500, fallbackPoint);
     return fallbackPoint;
   }
 
-  private rotate(delta: THREE.Vector2) {
+  private rotate(delta: Vector2) {
     const navCenter = this.navigationCenter;
     const camera = this.camera;
 
     // rotationKernelDelta logic
     const toCamera = camera.position.clone().sub(navCenter).applyQuaternion(camera.quaternion.clone().invert());
-    const euler = new THREE.Euler(0, 0, 0, 'YXZ'); // Changed to YXZ for Y-up
+    const euler = new Euler(0, 0, 0, 'YXZ'); // Changed to YXZ for Y-up
     euler.setFromQuaternion(camera.quaternion);
     
     // Adjust indices for Y-up
-    euler.x = THREE.MathUtils.clamp(euler.x + delta.y, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+    euler.x = MathUtils.clamp(euler.x + delta.y, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
     euler.y += delta.x;
     
     camera.quaternion.setFromEuler(euler);
@@ -175,18 +184,18 @@ export class CameraController {
     this.needsRender = true;
   }
 
-  private pan(ndc: THREE.Vector2) {
+  private pan(ndc: Vector2) {
     const raycaster = this.raycaster;
     this.camera.updateWorldMatrix(false, false);
     raycaster.setFromCamera(ndc, this.camera);
     
-    const intersectionPos = new THREE.Vector3();
+    const intersectionPos = new Vector3();
     const ray = raycaster.ray;
     
     const intersected = ray.intersectPlane(this.panPlane, intersectionPos);
     if (!intersected) {
-      const to = new THREE.Vector3();
-      const from = new THREE.Vector3();
+      const to = new Vector3();
+      const from = new Vector3();
       this.panPlane.projectPoint(ray.origin.clone().add(ray.direction), to);
       this.panPlane.projectPoint(ray.origin, from);
       const direction = to.clone().sub(from).normalize();
@@ -194,7 +203,7 @@ export class CameraController {
     }
 
     // Restrict distance
-    const from = new THREE.Vector3();
+    const from = new Vector3();
     this.panPlane.projectPoint(ray.origin, from);
     if (from.distanceTo(intersectionPos) > this.maxPanDistance) {
       const direction = intersectionPos.clone().sub(from).normalize();
@@ -221,7 +230,7 @@ export class CameraController {
     this.needsRender = true;
   }
 
-  setView(position: THREE.Vector3, target: THREE.Vector3) {
+  setView(position: Vector3, target: Vector3) {
     this.camera.position.copy(position);
     this.navigationCenter.copy(target);
     this.target.copy(target);
@@ -235,4 +244,3 @@ export class CameraController {
     return shouldRender;
   }
 }
-

@@ -1,32 +1,44 @@
-import * as THREE from 'three';
+import { 
+  Scene, 
+  PerspectiveCamera, 
+  WebGLRenderer, 
+  Clock, 
+  Color, 
+  Vector3, 
+  AmbientLight, 
+  DirectionalLight, 
+  GridHelper, 
+  AxesHelper, 
+  Object3D 
+} from 'three';
 import { CameraController } from './CameraController';
 
 export class World {
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  renderer: THREE.WebGLRenderer;
+  scene: Scene;
+  camera: PerspectiveCamera;
+  renderer: WebGLRenderer;
   controls: CameraController;
-  clock: THREE.Clock;
+  clock: Clock;
   container: HTMLElement;
   private needsRender: boolean = false;
 
   // For smooth transitions (programmatic moves like setView)
-  private targetDestination: THREE.Vector3 | null = null;
-  private cameraDestination: THREE.Vector3 | null = null;
+  private targetDestination: Vector3 | null = null;
+  private cameraDestination: Vector3 | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
     
     // Scene
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x333333);
+    this.scene = new Scene();
+    this.scene.background = new Color(0x333333);
 
     // Camera
-    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000000);
+    this.camera = new PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000000);
     this.camera.position.set(0, 500, 500);
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({ 
+    this.renderer = new WebGLRenderer({ 
         antialias: true, 
         alpha: true,
         logarithmicDepthBuffer: true 
@@ -37,10 +49,10 @@ export class World {
     container.appendChild(this.renderer.domElement);
 
     // Light
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    const dirLight = new DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(100, 1000, 500);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -52,7 +64,7 @@ export class World {
     this.camera.lookAt(this.controls.target);
     
     // Clock
-    this.clock = new THREE.Clock();
+    this.clock = new Clock();
 
     // Resize handling
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -69,11 +81,11 @@ export class World {
     this.renderer.domElement.addEventListener('wheel', renderTrigger, { passive: true });
 
     // Basic Floor Grid for reference
-    const gridHelper = new THREE.GridHelper(2000, 20, 0x555555, 0x444444);
+    const gridHelper = new GridHelper(2000, 20, 0x555555, 0x444444);
     this.scene.add(gridHelper);
     
     // Axes helper
-    const axesHelper = new THREE.AxesHelper(100);
+    const axesHelper = new AxesHelper(100);
     this.scene.add(axesHelper);
 
     this.animate();
@@ -98,6 +110,7 @@ export class World {
     }
 
     const delta = this.clock.getDelta();
+    // Logic for lerpFactor can remain simple
     const lerpFactor = 1 - Math.pow(0.001, delta);
 
     const controlsMoved = this.controls.update();
@@ -141,14 +154,14 @@ export class World {
     }
   }
 
-  add(object: THREE.Object3D) {
+  add(object: Object3D) {
     this.scene.add(object);
   }
 
   /**
    * Set camera view with optional smooth transition
    */
-  setView(position: THREE.Vector3, target: THREE.Vector3, smooth: boolean = true) {
+  setView(position: Vector3, target: Vector3, smooth: boolean = true) {
     if (smooth) {
       this.cameraDestination = position.clone();
       this.targetDestination = target.clone();

@@ -1,17 +1,17 @@
 import { GLTFLoader as ThreeGLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import * as THREE from 'three';
+import { BufferGeometry, Mesh, Group, Vector3, Euler, Box3 } from 'three';
 import { OriginManager } from '../utils/OriginManager';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 
 // Add BVH methods to Three.js prototypes
-THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
-THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
-THREE.Mesh.prototype.raycast = acceleratedRaycast;
+BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+Mesh.prototype.raycast = acceleratedRaycast;
 
 export class GLTFLoader {
   loader: ThreeGLTFLoader;
-  private cache: Map<string, Promise<THREE.Group>> = new Map();
+  private cache: Map<string, Promise<Group>> = new Map();
 
   constructor() {
     this.loader = new ThreeGLTFLoader();
@@ -21,7 +21,7 @@ export class GLTFLoader {
     this.loader.setDRACOLoader(dracoLoader);
   }
 
-  async load(url: string, position?: THREE.Vector3, scale?: THREE.Vector3, rotation?: THREE.Euler): Promise<THREE.Group> {
+  async load(url: string, position?: Vector3, scale?: Vector3, rotation?: Euler): Promise<Group> {
     if (!this.cache.has(url)) {
       this.cache.set(url, this.loadInternal(url));
     }
@@ -39,7 +39,7 @@ export class GLTFLoader {
     return model;
   }
 
-  private loadInternal(url: string): Promise<THREE.Group> {
+  private loadInternal(url: string): Promise<Group> {
     return new Promise((resolve, reject) => {
       this.loader.load(
         url,
@@ -49,8 +49,8 @@ export class GLTFLoader {
           model.updateMatrixWorld(true);
 
           model.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-              const mesh = child as THREE.Mesh;
+            if ((child as Mesh).isMesh) {
+              const mesh = child as Mesh;
               mesh.castShadow = true;
               mesh.receiveShadow = true;
               
@@ -74,7 +74,7 @@ export class GLTFLoader {
           
           if (userDataCenter) {
             const c = userDataCenter;
-            const centerVec = new THREE.Vector3(c.x, c.z, -c.y);
+            const centerVec = new Vector3(c.x, c.z, -c.y);
 
             // If no origin, and this is far away, set it
             if (!originManager.hasOrigin() && centerVec.length() > 1000) {
@@ -90,8 +90,8 @@ export class GLTFLoader {
             }
           } else {
             // Heuristic for world-coordinate models without userData.center
-            const box = new THREE.Box3().setFromObject(model);
-            const center = new THREE.Vector3();
+            const box = new Box3().setFromObject(model);
+            const center = new Vector3();
             box.getCenter(center);
 
             // If no origin, and this is far away, set it

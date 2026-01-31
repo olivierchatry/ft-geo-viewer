@@ -1,9 +1,9 @@
 // src/utils/OriginManager.ts
-import * as THREE from 'three';
+import { Vector3 } from 'three';
 
 export class OriginManager {
   private static instance: OriginManager;
-  public origin: THREE.Vector3 | null = null;
+  public origin: Vector3 | null = null;
 
   private constructor() {}
 
@@ -14,15 +14,15 @@ export class OriginManager {
     return OriginManager.instance;
   }
 
-  public setOrigin(point: THREE.Vector3) {
+  public setOrigin(point: Vector3) {
     if (!this.origin) {
       this.origin = point.clone();
       console.log('World Origin set to:', this.origin);
     }
   }
 
-  public getOrigin(): THREE.Vector3 {
-    return this.origin || new THREE.Vector3(0, 0, 0);
+  public getOrigin(): Vector3 {
+    return this.origin || new Vector3(0, 0, 0);
   }
 
   public hasOrigin(): boolean {

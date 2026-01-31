@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import { Group, MeshPhongMaterial, DoubleSide, LineBasicMaterial, Line, BufferGeometry, Float32BufferAttribute, Mesh, Material, Vector3 } from 'three';
 import earcut from 'earcut';
 import { OriginManager } from '../utils/OriginManager';
 
@@ -6,14 +6,14 @@ export class GeoJSONLoader {
 
   constructor() { }
 
-  async load(url: string): Promise<THREE.Group> {
+  async load(url: string): Promise<Group> {
     const response = await fetch(url);
     const json = await response.json();
     return this.parse(json);
   }
 
-  parse(json: any): THREE.Group {
-    const group = new THREE.Group();
+  parse(json: any): Group {
+    const group = new Group();
 
     // Ensure origin manager is initialized if needed
     OriginManager.getInstance();
@@ -27,9 +27,9 @@ export class GeoJSONLoader {
       const properties = feature.properties || {};
       const name = properties.name || properties.id || 'Feature';
       const color = properties.color || Math.random() * 0xffffff;
-      const material = new THREE.MeshPhongMaterial({ color, side: THREE.DoubleSide });
-      // const material = new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }); // Standard might look better with lights
-      const lineMaterial = new THREE.LineBasicMaterial({ color });
+      const material = new MeshPhongMaterial({ color, side: DoubleSide });
+      // const material = new MeshStandardMaterial({ color, side: DoubleSide }); // Standard might look better with lights
+      const lineMaterial = new LineBasicMaterial({ color });
 
       if (geometry.type === 'Polygon') {
         const mesh = this.createPolygonMesh(geometry.coordinates, material);
@@ -39,7 +39,7 @@ export class GeoJSONLoader {
           group.add(mesh);
         }
       } else if (geometry.type === 'MultiPolygon') {
-        const multiGroup = new THREE.Group();
+        const multiGroup = new Group();
         multiGroup.name = name;
         multiGroup.userData = properties;
 
@@ -56,7 +56,7 @@ export class GeoJSONLoader {
           group.add(line);
         }
       } else if (geometry.type === 'MultiLineString') {
-        const multiGroup = new THREE.Group();
+        const multiGroup = new Group();
         multiGroup.name = name;
         multiGroup.userData = properties;
         for (const lineCoords of geometry.coordinates) {
@@ -70,19 +70,19 @@ export class GeoJSONLoader {
     return group;
   }
 
-  createLine(coordinates: any[], material: THREE.LineBasicMaterial): THREE.Line | null {
+  createLine(coordinates: any[], material: LineBasicMaterial): Line | null {
     const vertices: number[] = [];
     this.processRing(coordinates, vertices);
 
     if (vertices.length === 0) return null;
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
 
-    return new THREE.Line(geometry, material);
+    return new Line(geometry, material);
   }
 
-  createPolygonMesh(coordinates: any[], material: THREE.Material): THREE.Mesh | null {
+  createPolygonMesh(coordinates: any[], material: Material): Mesh | null {
     // coordinates[0] is the outer ring, others are holes
     const vertices: number[] = [];
     const holeIndices: number[] = [];
@@ -147,15 +147,15 @@ export class GeoJSONLoader {
 
     const indices = earcut(flat2DVertices, flatHoleIndices, 2);
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
     
     // @ts-ignore
     if (geometry.computeBoundsTree) geometry.computeBoundsTree();
 
-    return new THREE.Mesh(geometry, material);
+    return new Mesh(geometry, material);
   }
 
   processRing(ring: any[], vertices: number[]) {
@@ -169,7 +169,7 @@ export class GeoJSONLoader {
       // Handle coordinates mapping
       // Basic Assumption: Input X,Y is ground plane.
       // Add 0.1 to height (z) to avoid z-fighting
-      const vec = new THREE.Vector3(x, z + 0.1, -y); // -y to flip North? standard mapping depends on projection.
+      const vec = new Vector3(x, z + 0.1, -y); // -y to flip North? standard mapping depends on projection.
 
       if (!originManager.hasOrigin()) {
         originManager.setOrigin(vec);

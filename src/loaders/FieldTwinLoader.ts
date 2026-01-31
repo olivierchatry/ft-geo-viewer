@@ -1,9 +1,40 @@
-import * as THREE from 'three';
+import { 
+  Group, 
+  BufferGeometry, 
+  Mesh, 
+  FileLoader, 
+  Object3D, 
+  Vector2, 
+  Vector3, 
+  BufferAttribute, 
+  TextureLoader, 
+  Texture, 
+  MeshStandardMaterial, 
+  SRGBColorSpace, 
+  RepeatWrapping, 
+  LinearMipmapLinearFilter, 
+  DoubleSide, 
+  Euler, 
+  MathUtils, 
+  BoxGeometry, 
+  CylinderGeometry, 
+  CatmullRomCurve3, 
+  TubeGeometry, 
+  Color,
+  Material
+} from 'three';
+import type { MeshStandardMaterialParameters } from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { OriginManager } from '../utils/OriginManager';
 import { GLTFLoader } from './GLTFLoader';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+// Add BVH methods to Three.js prototypes
+BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+Mesh.prototype.raycast = acceleratedRaycast;
 
 interface FieldTwinConnection {
   sampled: { x: number; y: number; z: number }[];
@@ -66,9 +97,21 @@ interface FieldTwinLayer {
   urlNormalMap?: string;
   color?: string;
   opacity?: number;
+  seaBedTextureName?: string;
   // Add other potential properties
   [key: string]: any;
 }
+
+const SEABED_TEXTURE_MAP: Record<string, string> = {
+  rocksDiffuse: 'RockySeabed_dark_01_1024x1024.jpg',
+  rocksLightDiffuse: 'RockySeabed_light_01_1024x1024.jpg',
+  rocks2Diffuse: 'rocks2.jpg',
+  sandsDiffuse: 'SandySeabed_dark_01_1024x1024.jpg',
+  sandsLightDiffuse: 'SandySeabed_light_01_1024x1024.jpg',
+  muddyDiffuse: 'MuddySeabed_dark_01_1024x1024.jpg',
+  muddyLightDiffuse: 'MuddySeabed_light_01_1024x1024.jpg',
+  desertDiffuse: 'DesertSand_01_1024x1024.jpg',
+};
 
 interface FieldTwinWell {
   path: { x: number; y: number; z: number }[];
@@ -89,23 +132,23 @@ interface FieldTwinData {
 
 export class FieldTwinLoader {
   private originManager: OriginManager;
-  private fileLoader: THREE.FileLoader;
+  private fileLoader: FileLoader;
   private gltfLoader: GLTFLoader;
 
   constructor() {
     this.originManager = OriginManager.getInstance();
-    this.fileLoader = new THREE.FileLoader();
+    this.fileLoader = new FileLoader();
     this.fileLoader.setResponseType('arraybuffer');
     this.gltfLoader = new GLTFLoader();
   }
 
-  public async load(_url: string, payload: any, onProgress?: (message: string, percent: number) => void): Promise<THREE.Group> {
+  public async load(_url: string, payload: any, onProgress?: (message: string, percent: number) => void): Promise<Group> {
     return this.parse(payload, onProgress);
   }
 
-  public async parse(data: any, onProgress?: (message: string, percent: number) => void): Promise<THREE.Group> {
+  public async parse(data: any, onProgress?: (message: string, percent: number) => void): Promise<Group> {
     console.log("Parsing FieldTwin Data with Staged Assets", data);
-    const group = new THREE.Group();
+    const group = new Group();
     group.name = 'FieldTwin Layer';
 
     const ftData = data as FieldTwinData;
@@ -141,7 +184,7 @@ export class FieldTwinLoader {
 
     // 1. Shapes
     if (ftData.shapes) {
-      const shapeGroup = new THREE.Group();
+      const shapeGroup = new Group();
       shapeGroup.name = 'Shapes';
       Object.values(ftData.shapes).forEach((shape: any) => {
         if (shape.visible === false) return;
@@ -157,7 +200,7 @@ export class FieldTwinLoader {
 
     // 2. Wells
     if (ftData.wells) {
-      const wellGroup = new THREE.Group();
+      const wellGroup = new Group();
       wellGroup.name = 'Wells';
       let loadedWells = 0;
       Object.values(ftData.wells).forEach((well: any) => {
@@ -178,7 +221,7 @@ export class FieldTwinLoader {
 
     // 3. Connections
     if (ftData.connections) {
-      const connGroup = new THREE.Group();
+      const connGroup = new Group();
       connGroup.name = 'Connections';
       Object.values(ftData.connections).forEach((conn: any) => {
         if (conn.visible === false) return;
@@ -196,7 +239,7 @@ export class FieldTwinLoader {
 
     // 4. Layers (XVB)
     if (layers && Object.keys(layers).length > 0) {
-      const mapGroup = new THREE.Group();
+      const mapGroup = new Group();
       mapGroup.name = 'Terrain Layers';
       // Load in parallel
       const promises = Object.values(layers).map(async (layer) => {
@@ -220,7 +263,7 @@ export class FieldTwinLoader {
           }
         } else {
           // Add a placeholder for non-XVB layers so they appear in the scene graph (and UI)
-          const placeholder = new THREE.Group();
+          const placeholder = new Group();
           placeholder.name = layer.name || 'Unnamed Layer';
           placeholder.userData = { ...layer, type: 'Placeholder/Overlay' };
           mapGroup.add(placeholder);
@@ -238,7 +281,7 @@ export class FieldTwinLoader {
 
     // 5. Staged Assets
     if (ftData.stagedAssets && Object.keys(ftData.stagedAssets).length > 0) {
-      const assetGroup = new THREE.Group();
+      const assetGroup = new Group();
       assetGroup.name = 'Staged Assets';
       // Load in parallel
       const promises = Object.values(ftData.stagedAssets).map(async (asset) => {
@@ -271,7 +314,7 @@ export class FieldTwinLoader {
     return group;
   }
 
-  private async loadXvbLayer(layer: FieldTwinLayer): Promise<THREE.Object3D | null> {
+  private async loadXvbLayer(layer: FieldTwinLayer): Promise<Object3D | null> {
     const url = layer.url;
     const name = layer.name;
     const normalMapUrl = layer.urlNormalMap;
@@ -303,7 +346,7 @@ export class FieldTwinLoader {
       const minZ = floatData[2]; // Elev
       const maxX = floatData[3];
       const maxY = floatData[4];
-      const maxZ = floatData[5];
+      // const maxZ = floatData[5];
 
       const heights = new Float32Array(downloadedData, 32);
 
@@ -312,10 +355,10 @@ export class FieldTwinLoader {
         return null;
       }
 
-      const customGeo = new THREE.BufferGeometry();
+      const customGeo = new BufferGeometry();
       (customGeo as any).isXvbGeometry = true;
 
-      const bboxSize = new THREE.Vector2(maxX - minX, maxY - minY);
+      const bboxSize = new Vector2(maxX - minX, maxY - minY);
       const gridX = Math.floor(width - 1) || 1;
       const gridY = Math.floor(height - 1) || 1;
       const gridX1 = gridX + 1;
@@ -411,19 +454,18 @@ export class FieldTwinLoader {
         }
       }
 
-      customGeo.setIndex(new THREE.BufferAttribute(indices, 1));
-      customGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      customGeo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-      customGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      customGeo.setIndex(new BufferAttribute(indices, 1));
+      customGeo.setAttribute('position', new BufferAttribute(vertices, 3));
+      customGeo.setAttribute('normal', new BufferAttribute(normals, 3));
+      customGeo.setAttribute('uv', new BufferAttribute(uvs, 2));
 
       // Speed up raycasting for large terrain
-      // @ts-ignore
-      if (customGeo.computeBoundsTree) customGeo.computeBoundsTree();
+      customGeo.computeBoundsTree();
 
       // Create seabed-style material
-      const material = await this.createSeabedMaterial(normalMapUrl, minZ, maxZ);
+      const material = await this.createSeabedMaterial(layer.seaBedTextureName, normalMapUrl);
 
-      const mesh = new THREE.Mesh(customGeo, material);
+      const mesh = new Mesh(customGeo, material);
       mesh.name = name || 'XVB Terrain';
       mesh.position.copy(meshPos);
 
@@ -450,153 +492,91 @@ export class FieldTwinLoader {
   /**
    * Creates a seabed-style material with optional normal map
    */
-  private async createSeabedMaterial(normalMapUrl?: string, _minElev?: number, _maxElev?: number): Promise<THREE.Material> {
-    const textureLoader = new THREE.TextureLoader();
+  private async createSeabedMaterial(seaBedTextureName?: string, normalMapUrl?: string): Promise<Material> {
+    const textureLoader = new TextureLoader();
+    const baseUrl = import.meta.env.BASE_URL; 
+    textureLoader.setPath(`${baseUrl}seabed/`); 
 
-    // Generate procedural seabed diffuse texture
-    const diffuseTexture = this.generateSeabedTexture(512);
-    diffuseTexture.wrapS = THREE.RepeatWrapping;
-    diffuseTexture.wrapT = THREE.RepeatWrapping;
-    const repeatScale = 4; // Lower repeat = less moire
-    diffuseTexture.repeat.set(repeatScale, repeatScale);
+    let diffuseTexture: Texture | null = null;
+    const defaultFilename = 'SandySeabed_dark_01_1024x1024.jpg';
+    let filename = defaultFilename;
 
-    // Enable anisotropic filtering to prevent moire at sharp angles
-    diffuseTexture.anisotropy = 16;
-    diffuseTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    if (seaBedTextureName) {
+      if (SEABED_TEXTURE_MAP[seaBedTextureName]) {
+        filename = SEABED_TEXTURE_MAP[seaBedTextureName];
+      } else {
+        console.warn(`Unknown seaBedTextureName: "${seaBedTextureName}". Using default.`);
+      }
+    }
 
-    const materialParams: THREE.MeshStandardMaterialParameters = {
-      map: diffuseTexture,
+    try {
+      diffuseTexture = await textureLoader.loadAsync(filename);
+    } catch (e) {
+      console.warn(`Failed to load texture ${filename} from ${baseUrl}seabed/, falling back to default.`);
+      if (filename !== defaultFilename) {
+        try {
+           diffuseTexture = await textureLoader.loadAsync(defaultFilename);
+        } catch(e2) {
+           console.error("Failed to load default texture.");
+        }
+      }
+    }
+
+    const materialParams: MeshStandardMaterialParameters = {
       roughness: 0.95,
       metalness: 0.0,
-      side: THREE.DoubleSide,
+      side: DoubleSide,
     };
+
+    if (diffuseTexture) {
+      diffuseTexture.colorSpace = SRGBColorSpace;
+      diffuseTexture.wrapS = RepeatWrapping;
+      diffuseTexture.wrapT = RepeatWrapping;
+      
+      // Lower repeat = less moire
+      const repeatScale = 4; 
+      diffuseTexture.repeat.set(repeatScale, repeatScale);
+  
+      // Enable anisotropic filtering to prevent moire at sharp angles
+      diffuseTexture.anisotropy = 16;
+      diffuseTexture.minFilter = LinearMipmapLinearFilter;
+      materialParams.map = diffuseTexture;
+    } else {
+       // Fallback color if texture loading fails completely
+       materialParams.color = 0x888888;
+    }
 
     // Load normal map if URL provided
     if (normalMapUrl) {
+      const repeatScale = 4; 
       try {
         console.log(`Loading normal map: ${normalMapUrl}`);
-        const normalMap = await textureLoader.loadAsync(normalMapUrl);
-        normalMap.wrapS = THREE.RepeatWrapping;
-        normalMap.wrapT = THREE.RepeatWrapping;
+        // Normal map loader (reset path as normalMapUrl is likely an absolute URL from FT)
+        const normalLoader = new TextureLoader(); 
+        const normalMap = await normalLoader.loadAsync(normalMapUrl);
+        
+        normalMap.wrapS = RepeatWrapping;
+        normalMap.wrapT = RepeatWrapping;
         normalMap.repeat.set(repeatScale, repeatScale); // Must match diffuse repeat
         normalMap.anisotropy = 16; // CRITICAL for reducing moire in lighting
         materialParams.normalMap = normalMap;
-        materialParams.normalScale = new THREE.Vector2(1, 1);
+        materialParams.normalScale = new Vector2(1, 1);
         console.log(`Normal map loaded successfully`);
       } catch (e) {
         console.warn(`Failed to load normal map: ${e}`);
       }
     }
 
-    return new THREE.MeshStandardMaterial(materialParams);
+    return new MeshStandardMaterial(materialParams);
   }
 
-  /**
-   * Generates a procedural seabed texture (sandy/muddy seafloor appearance)
-   * Designed to be organic, sandy, and tileable without visible moire patterns.
-   */
-  private generateSeabedTexture(size: number): THREE.CanvasTexture {
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-
-    // Base color - organic seabed (invert R and B per user feedback)
-    const baseR = 48, baseG = 55, baseB = 52;
-
-    // Fill with base color
-    ctx.fillStyle = `rgb(${baseR}, ${baseG}, ${baseB})`;
-    ctx.fillRect(0, 0, size, size);
-
-    const imageData = ctx.getImageData(0, 0, size, size);
-    const data = imageData.data;
-
-    /**
-     * Organic noise generator that avoids axis-aligned artifacts (the "cross" pattern)
-     * uses integer-based sums/differences to ensure perfect tileability over 2PI.
-     */
-    const getNoise = (nx: number, ny: number) => {
-      let n = 0;
-      // Layer 1: Large organic waves at an angle
-      n += Math.sin(nx * 1 + ny * 1) * Math.cos(nx * 1 - ny * 2) * 1.0;
-      // Layer 2: Medium details with prime-ish frequency mixing
-      n += Math.sin(nx * 3 - ny * 2) * Math.cos(nx * 2 + ny * 5) * 0.5;
-      // Layer 3: Finer variation
-      n += Math.sin(nx * 7 + ny * 3) * Math.cos(nx * 4 - ny * 7) * 0.25;
-      // Layer 4: High frequency ripples
-      n += Math.sin(nx * 13 - ny * 5) * Math.cos(nx * 8 + ny * 11) * 0.125;
-      return n;
-    };
-
-    for (let i = 0; i < data.length; i += 4) {
-      const x = (i / 4) % size;
-      const y = Math.floor((i / 4) / size);
-
-      const nx = (x / size) * Math.PI * 2;
-      const ny = (y / size) * Math.PI * 2;
-
-      // Multi-scale organic noise
-      const noise = getNoise(nx, ny);
-
-      // High-frequency sand grain (randomness per pixel)
-      const grain = (Math.random() - 0.5) * 5;
-
-      // Total noise influence
-      const totalNoise = (noise * 18) + grain;
-
-      // RGBA order - inverting R and B here too just in case it's a systemic texture interpretation issue
-      data[i] = Math.max(0, Math.min(255, baseB + totalNoise * 0.9));
-      data[i + 1] = Math.max(0, Math.min(255, baseG + totalNoise * 0.98));
-      data[i + 2] = Math.max(0, Math.min(255, baseR + totalNoise));
-      data[i + 3] = 255;
-    }
-
-    // Add subtle procedural "clump" variation but much softer
-    for (let spot = 0; spot < 40; spot++) {
-      const sx = Math.random() * size;
-      const sy = Math.random() * size;
-      const radius = 2 + Math.random() * 6;
-      const darkness = 0.05 + Math.random() * 0.1;
-
-      for (let dy = -radius; dy <= radius; dy++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < radius) {
-            const px = (Math.floor(sx + dx) + size) % size;
-            const py = (Math.floor(sy + dy) + size) % size;
-            const idx = (py * size + px) * 4;
-
-            const factor = 1.0 - (darkness * (1.0 - dist / radius));
-            data[idx] *= factor;
-            data[idx + 1] *= factor;
-            data[idx + 2] *= factor;
-          }
-        }
-      }
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-
-    // Final soften/blur to eliminate any pixel-level aliasing (main cause of moire)
-    ctx.globalAlpha = 0.4;
-    ctx.drawImage(canvas, 1, 0);
-    ctx.drawImage(canvas, -1, 0);
-    ctx.drawImage(canvas, 0, 1);
-    ctx.drawImage(canvas, 0, -1);
-    ctx.globalAlpha = 1.0;
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
-  }
-
-  private normalizeCoordinate(x: number, y: number, z: number): THREE.Vector3 {
+  private normalizeCoordinate(x: number, y: number, z: number): Vector3 {
     // Data: X=East, Y=North, Z=Elevation
     // Three: X=Right, Y=Up, Z=Back
 
     // Construction Vector: Input X -> Three X, Input Z -> Three Y, Input Y -> Three -Z
     const zBias = 0.1;
-    const raw = new THREE.Vector3(x, z + zBias, -y);
+    const raw = new Vector3(x, z + zBias, -y);
 
     if (!this.originManager.hasOrigin()) {
       // Ignore (0,0) coordinates for origin setting as they are likely invalid/default
@@ -609,7 +589,7 @@ export class FieldTwinLoader {
     return raw.clone().sub(origin);
   }
 
-  private async createStagedAsset(asset: FieldTwinStagedAsset): Promise<THREE.Group | null> {
+  private async createStagedAsset(asset: FieldTwinStagedAsset): Promise<Group | null> {
     const url = asset.asset?.model3durl || asset.asset?.model3dUrl;
     if (!url) return null;
 
@@ -637,21 +617,21 @@ export class FieldTwinLoader {
 
     // Rotation
     // FT rotation usually degrees (0=North, 90=East) - heading.
-    const rotation = new THREE.Euler(0, 0, 0);
+    const rotation = new Euler(0, 0, 0);
     const heading = state.rotation ?? 0;
 
     // Mapping FT Heading to Three.js Y-rotation
     // FT: Clockwise. Three.js: Counter-clockwise.
-    rotation.y = THREE.MathUtils.degToRad(-heading);
+    rotation.y = MathUtils.degToRad(-heading);
 
     // Apply tilt/roll if present in asset.rotation object
     if (typeof asset.rotation === 'object') {
-      if (asset.rotation.x) rotation.x = THREE.MathUtils.degToRad(asset.rotation.x);
-      if (asset.rotation.y) rotation.z = THREE.MathUtils.degToRad(asset.rotation.y);
+      if (asset.rotation.x) rotation.x = MathUtils.degToRad(asset.rotation.x);
+      if (asset.rotation.y) rotation.z = MathUtils.degToRad(asset.rotation.y);
     }
 
     // Scale
-    const scale = new THREE.Vector3(1, 1, 1);
+    const scale = new Vector3(1, 1, 1);
     if (asset.scale) {
       scale.set(asset.scale.x ?? 1, asset.scale.y ?? 1, asset.scale.z ?? 1);
     }
@@ -677,16 +657,16 @@ export class FieldTwinLoader {
     return `#${b}${g}${r}`;
   }
 
-  private createShape(shape: FieldTwinShape): THREE.Object3D | null {
+  private createShape(shape: FieldTwinShape): Object3D | null {
     // Skip artifacts at 0,0,0
     if (Math.abs(shape.x) < 0.01 && Math.abs(shape.y) < 0.01) {
       return null;
     }
 
-    let geometry: THREE.BufferGeometry | undefined;
+    let geometry: BufferGeometry | undefined;
     // Default color white if missing
     const colorVal = this.fixColor(shape.color);
-    let material = new THREE.MeshStandardMaterial({
+    let material = new MeshStandardMaterial({
       color: colorVal,
       roughness: 0.7,
       metalness: 0.1
@@ -700,28 +680,28 @@ export class FieldTwinLoader {
     switch (shape.shapeType) {
       case 'Rectangle':
       case 'Cube':
-        geometry = new THREE.BoxGeometry(width, height, depth);
+        geometry = new BoxGeometry(width, height, depth);
         break;
       case 'Cylinder':
       case 'Tube':
         const radiusTop = shape.cylinderRadiusTop || 5;
         const radiusBottom = shape.cylinderRadiusBottom || 5;
         const cylHeight = shape.cylinderHeight || height;
-        geometry = new THREE.CylinderGeometry(radiusTop, radiusBottom, cylHeight, 16);
+        geometry = new CylinderGeometry(radiusTop, radiusBottom, cylHeight, 16);
         break;
       default:
-        geometry = new THREE.BoxGeometry(5, 5, 5);
+        geometry = new BoxGeometry(5, 5, 5);
         break;
     }
 
     if (geometry) {
-      const mesh = new THREE.Mesh(geometry, material);
+      const mesh = new Mesh(geometry, material);
       const pos = this.normalizeCoordinate(shape.x, shape.y, shape.z);
       mesh.position.copy(pos);
 
       if (shape.rotation) {
         if (shape.rotation.z) {
-          mesh.rotation.y = THREE.MathUtils.degToRad(-shape.rotation.z);
+          mesh.rotation.y = MathUtils.degToRad(-shape.rotation.z);
         }
       }
 
@@ -732,14 +712,14 @@ export class FieldTwinLoader {
     return null;
   }
 
-  private createWell(well: FieldTwinWell): THREE.Object3D | null {
+  private createWell(well: FieldTwinWell): Object3D | null {
     if (!well.path || well.path.length === 0) {
       // Log keys for the first few errors to debug data structure
       console.warn("Well missing path. Available keys:", Object.keys(well));
       return null;
     }
 
-    const points: THREE.Vector3[] = [];
+    const points: Vector3[] = [];
     well.path.forEach(p => {
       // Well path Z is depth (positive going down), so negate it for elevation
       points.push(this.normalizeCoordinate(p.x, p.y, -p.z));
@@ -748,30 +728,30 @@ export class FieldTwinLoader {
     if (points.length < 2) return null;
 
     // Create curve
-    const curve = new THREE.CatmullRomCurve3(points);
+    const curve = new CatmullRomCurve3(points);
     const radius = well.radius !== undefined ? well.radius : 1;
     const tubularSegments = Math.max(64, points.length * 2);
 
-    const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 8, false);
+    const geometry = new TubeGeometry(curve, tubularSegments, radius, 8, false);
 
     const colorVal = this.fixColor(well.color) || '#ff0000';
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardMaterial({
       color: colorVal,
       roughness: 0.6,
       metalness: 0.2
     });
 
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new Mesh(geometry, material);
     mesh.name = well.name || 'Well';
     mesh.userData = well;
 
     return mesh;
   }
 
-  private createConnection(conn: FieldTwinConnection): THREE.Object3D | null {
+  private createConnection(conn: FieldTwinConnection): Object3D | null {
     if (!conn.sampled || conn.sampled.length === 0) return null;
 
-    const points: THREE.Vector3[] = [];
+    const points: Vector3[] = [];
     conn.sampled.forEach(p => {
       points.push(this.normalizeCoordinate(p.x, p.y, p.z + 0.1));
     });
@@ -791,10 +771,10 @@ export class FieldTwinLoader {
     geometry.setPositions(positions);
 
     const material = new LineMaterial({
-      color: new THREE.Color(colorVal).getHex(),
+      color: new Color(colorVal).getHex(),
       linewidth: 3, // Width in pixels
       worldUnits: false, // Use screen-space width
-      resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+      resolution: new Vector2(window.innerWidth, window.innerHeight),
     });
 
     const line = new Line2(geometry, material);

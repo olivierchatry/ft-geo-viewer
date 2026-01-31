@@ -4,7 +4,20 @@ import { GLTFLoader } from './loaders/GLTFLoader';
 import { GeoJSONLoader } from './loaders/GeoJSONLoader';
 import { FieldTwinLoader } from './loaders/FieldTwinLoader';
 import { OriginManager } from './utils/OriginManager';
-import * as THREE from 'three';
+import { 
+  Raycaster, 
+  Vector2, 
+  Vector3, 
+  Plane, 
+  GridHelper, 
+  AxesHelper, 
+  Object3D, 
+  Mesh, 
+  Line, 
+  LineBasicMaterial, 
+  Material, 
+  Box3 
+} from 'three';
 import GUI from 'lil-gui';
 
 const world = new World(document.body);
@@ -52,8 +65,8 @@ coordsDiv.innerText = 'E: 0.00, N: 0.00, H: 0.00';
 document.body.appendChild(coordsDiv);
 
 // Raycaster for coordinates
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
+const raycaster = new Raycaster();
+const mouse = new Vector2();
 
 window.addEventListener('mousemove', (event) => {
   // Calculate mouse position in normalized device coordinates
@@ -72,7 +85,7 @@ window.addEventListener('mousemove', (event) => {
 
   const intersects = raycaster.intersectObjects(world.scene.children, true);
 
-  let point: THREE.Vector3 | null = null;
+  let point: Vector3 | null = null;
 
   // Find first valid intersection (ignore grid helpers etc if possible, but they are meshes/line segments)
   // Actually GridHelper is LineSegments.
@@ -80,7 +93,7 @@ window.addEventListener('mousemove', (event) => {
   for (const intersect of intersects) {
     // Ignore lines if we want only surfaces, but GeoJSON lines are lines.
     // Let's ignore GridHelper and AxesHelper
-    if (intersect.object instanceof THREE.GridHelper || intersect.object instanceof THREE.AxesHelper) continue;
+    if (intersect.object instanceof GridHelper || intersect.object instanceof AxesHelper) continue;
     if (intersect.object.name === 'Sky') continue; // if we had a skybox
 
     point = intersect.point;
@@ -90,8 +103,8 @@ window.addEventListener('mousemove', (event) => {
   // If no intersection (e.g. looking at sky), maybe project to ground plane (y=0)?
   if (!point) {
     // Raycast to plane y=0
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const target = new THREE.Vector3();
+    const plane = new Plane(new Vector3(0, 1, 0), 0);
+    const target = new Vector3();
     point = raycaster.ray.intersectPlane(plane, target);
   }
 
@@ -125,7 +138,7 @@ const params = {
   loadGeoJSON: () => document.getElementById('geojsonInput')?.click(),
   loadFieldTwin: () => { ftModal.style.display = 'flex'; },
   resetCamera: () => {
-    world.setView(new THREE.Vector3(0, 500, 500), new THREE.Vector3(0, 0, 0), true);
+    world.setView(new Vector3(0, 500, 500), new Vector3(0, 0, 0), true);
   },
   clearScene: () => {
     location.reload();
@@ -140,8 +153,8 @@ gui.add(params, 'clearScene').name('Clear / Reload');
 
 // Helper folder
 const displayFolder = gui.addFolder('Environment');
-// displayFolder.add(world.scene.fog as THREE.Fog, 'near', 0, 1000).name('Fog Near');
-// displayFolder.add(world.scene.fog as THREE.Fog, 'far', 1000, 50000).name('Fog Far');
+// displayFolder.add(world.scene.fog as Fog, 'near', 0, 1000).name('Fog Near');
+// displayFolder.add(world.scene.fog as Fog, 'far', 1000, 50000).name('Fog Far');
 displayFolder.addColor(world.scene, 'background').name('Background');
 displayFolder.close();
 
@@ -298,7 +311,7 @@ document.body.appendChild(ftModal);
 
 // --- Layer Management ---
 
-function addLayerToGUI(name: string, object: THREE.Object3D) {
+function addLayerToGUI(name: string, object: Object3D) {
   const folder = layersFolder.addFolder(name);
 
   // Visibility toggle for the whole layer
@@ -323,8 +336,8 @@ function addLayerToGUI(name: string, object: THREE.Object3D) {
 
   folder.add(layerControls, 'wireframe').name('Wireframe').onChange((val: boolean) => {
     object.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
+      if ((child as Mesh).isMesh) {
+        const mesh = child as Mesh;
         if (Array.isArray(mesh.material)) {
           mesh.material.forEach(m => {
             if ('wireframe' in m) {
@@ -333,7 +346,7 @@ function addLayerToGUI(name: string, object: THREE.Object3D) {
             }
           });
         } else {
-          const m = mesh.material as THREE.Material;
+          const m = mesh.material as Material;
           if ('wireframe' in m) {
             (m as any).wireframe = val;
             m.needsUpdate = true;
@@ -347,15 +360,15 @@ function addLayerToGUI(name: string, object: THREE.Object3D) {
   folder.add(layerControls, 'lineSize', 1, 20).name('Line Size').onChange((val: number) => {
     object.traverse((child) => {
       // For Lines
-      if ((child as THREE.Line).isLine) {
-        const line = child as THREE.Line;
-        const mat = line.material as THREE.LineBasicMaterial;
+      if ((child as Line).isLine) {
+        const line = child as Line;
+        const mat = line.material as LineBasicMaterial;
         mat.linewidth = val;
         mat.needsUpdate = true;
       }
       // For Meshes (Wireframe thickness)
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
+      if ((child as Mesh).isMesh) {
+        const mesh = child as Mesh;
         if (Array.isArray(mesh.material)) {
           mesh.material.forEach(m => {
             // @ts-ignore
@@ -417,7 +430,7 @@ async function processFile(file: File) {
   const url = URL.createObjectURL(file);
 
   try {
-    let object: THREE.Object3D | null = null;
+    let object: Object3D | null = null;
     setLoader(`Loading ${filename}...`, 20);
 
     if (filename.toLowerCase().endsWith('.glb') || filename.toLowerCase().endsWith('.gltf')) {
@@ -456,17 +469,17 @@ async function processFile(file: File) {
 }
 
 
-function fitCameraToObject(object: THREE.Object3D) {
-  const box = new THREE.Box3().setFromObject(object);
+function fitCameraToObject(object: Object3D) {
+  const box = new Box3().setFromObject(object);
   if (!box.isEmpty()) {
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
 
     // If it's the first object or ground, maybe we want to look at it from top
     // With MapControls, usually we look at target.
 
-    const camPos = new THREE.Vector3(center.x, center.y + maxDim, center.z + maxDim);
+    const camPos = new Vector3(center.x, center.y + maxDim, center.z + maxDim);
     world.setView(camPos, center, true);
   }
 }
