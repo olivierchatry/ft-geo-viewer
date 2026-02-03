@@ -4,20 +4,21 @@ import { GLTFLoader } from './loaders/GLTFLoader';
 import { GeoJSONLoader } from './loaders/GeoJSONLoader';
 import { FieldTwinLoader } from './loaders/FieldTwinLoader';
 import { OriginManager } from './utils/OriginManager';
-import { 
-  Raycaster, 
-  Vector2, 
-  Vector3, 
-  Plane, 
-  GridHelper, 
-  AxesHelper, 
-  Object3D, 
-  Mesh, 
-  Line, 
-  LineBasicMaterial, 
-  Material, 
-  Box3 
+import {
+  Raycaster,
+  Vector2,
+  Vector3,
+  Plane,
+  GridHelper,
+  AxesHelper,
+  Object3D,
+  Mesh,
+  Line,
+  LineBasicMaterial,
+  Material,
+  Box3
 } from 'three';
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import GUI from 'lil-gui';
 
 const world = new World(document.body);
@@ -45,7 +46,7 @@ function hideLoader() {
 }
 
 // Initial hide (engine only)
-setTimeout(hideLoader, 1000); 
+setTimeout(hideLoader, 1000);
 
 // --- Coordinate Display ---
 const coordsDiv = document.createElement('div');
@@ -133,10 +134,43 @@ window.addEventListener('mousemove', (event) => {
 const gui = new GUI({ title: '3D Geo Viewer' });
 const layersFolder = gui.addFolder('Layers');
 
+function save(blob: Blob, filename: string) {
+  const link = document.createElement('a');
+  link.style.display = 'none';
+  document.body.appendChild(link); // Firefox workaround
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  document.body.removeChild(link);
+}
+
+function saveArrayBuffer(buffer: ArrayBuffer, filename: string) {
+  save(new Blob([buffer], { type: 'application/octet-stream' }), filename);
+}
+
 const params = {
   loadGLB: () => document.getElementById('glbInput')?.click(),
   loadGeoJSON: () => document.getElementById('geojsonInput')?.click(),
   loadFieldTwin: () => { ftModal.style.display = 'flex'; },
+  exportGLB: () => {
+    const exporter = new GLTFExporter();
+    exporter.parse(
+      world.scene,
+      (result) => {
+        if (result instanceof ArrayBuffer) {
+          saveArrayBuffer(result, 'scene.glb');
+        } else {
+          console.warn('GLTFExporter returned JSON but binary was requested, handling anyway.');
+          save(new Blob([JSON.stringify(result, null, 2)], { type: 'text/plain' }), 'scene.gltf');
+        }
+      },
+      (error) => {
+        console.error('An error happened during parsing', error);
+        alert('Error exporting GLB check console');
+      },
+      { binary: true }
+    );
+  },
   resetCamera: () => {
     world.setView(new Vector3(0, 500, 500), new Vector3(0, 0, 0), true);
   },
@@ -148,6 +182,7 @@ const params = {
 gui.add(params, 'loadGeoJSON').name('Load GeoJSON');
 gui.add(params, 'loadGLB').name('Load Model');
 gui.add(params, 'loadFieldTwin').name('Load from FieldTwin API');
+gui.add(params, 'exportGLB').name('Export Scene (GLB)');
 gui.add(params, 'resetCamera').name('Reset Camera');
 gui.add(params, 'clearScene').name('Clear / Reload');
 
@@ -246,7 +281,7 @@ ftLoad.onclick = async () => {
 
   if (urlMatch && tokenMatch) {
     let url = urlMatch[1];
-    
+
     // Cleanup URL: only keep up to subProject/{id}
     const subProjectMatch = url.match(/(.*\/subProjects?\/[^/]+)/i);
     if (subProjectMatch) {
@@ -256,7 +291,7 @@ ftLoad.onclick = async () => {
     const token = tokenMatch[1];
     try {
       console.log(`Fetching FieldTwin Data...`);
-      
+
       setLoader("Connecting to FieldTwin API...", 10);
 
       const response = await fetch(url, {
@@ -271,9 +306,9 @@ ftLoad.onclick = async () => {
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
       const json = await response.json();
-    
+
       const group = await fieldTwinLoader.load(url, json, (msg, percent) => {
-           setLoader(msg, percent);
+        setLoader(msg, percent);
       });
 
       console.log('FieldTwin Loader returned group:', group);
@@ -297,7 +332,7 @@ ftLoad.onclick = async () => {
       console.error(e);
       alert('Failed to load FieldTwin data check console');
     } finally {
-       hideLoader();
+      hideLoader();
     }
   } else {
     alert('Could not parse cURL command. Ensure it has URL and Authorization header.');
